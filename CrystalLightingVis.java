@@ -85,7 +85,7 @@ public class CrystalLightingVis {
     String generate(String seedStr) {
       try {
         // generate test case
-        SecureRandom r1 = SecureRandom.getInstance("SHA1PRNG"); 
+        SecureRandom r1 = SecureRandom.getInstance("SHA1PRNG");
         long seed = Long.parseLong(seedStr);
         r1.setSeed(seed);
         H = r1.nextInt(maxS - minS + 1) + minS;
@@ -118,7 +118,7 @@ public class CrystalLightingVis {
         // generate limits for mirrors and obstacles
         maxMirrors = r1.nextInt(numCrystals/8 + 1);
         maxObstacles = r1.nextInt(numCrystals/16 + 1);
-        if (seed == 1) 
+        if (seed == 1)
             maxMirrors = maxObstacles = 3;
 
         StringBuffer sb = new StringBuffer();
@@ -138,7 +138,7 @@ public class CrystalLightingVis {
       }
       catch (Exception e) {
         addFatalError("An exception occurred while generating test case.");
-        e.printStackTrace(); 
+        e.printStackTrace();
         return "";
       }
     }
@@ -237,15 +237,15 @@ public class CrystalLightingVis {
         resultBoard[R][C] = type;
         if (type == 'X') {
             int usedObstacles = 0;
-            for(Item item : addedItems) 
+            for(Item item : addedItems)
                 if (item.isObstacle()) usedObstacles++;
-            if (usedObstacles >= maxObstacles) 
+            if (usedObstacles >= maxObstacles)
                 return "You can place at most " + maxObstacles + " obstacles.";
         } else if (type == '/' || type == '\\') {
             int usedMirrors = 0;
-            for(Item item : addedItems) 
+            for(Item item : addedItems)
                 if (item.isMirror()) usedMirrors++;
-            if (usedMirrors >= maxMirrors) 
+            if (usedMirrors >= maxMirrors)
                 return "You can place at most " + maxMirrors + " mirrors.";
         }
         addedItems.add(new Item(R, C, type));
@@ -254,8 +254,8 @@ public class CrystalLightingVis {
     // -----------------------------------------
     double getScore() {
         // Check first for invalid lanterns
-        for(Item item : addedItems) 
-            if (item.isLantern() && !item.valid) 
+        for(Item item : addedItems)
+            if (item.isLantern() && !item.valid)
                 return invalidScore;
 
         // Score is: 20 for each correct primary color crystal, 30 for each correct secondary color crystal,
@@ -266,7 +266,7 @@ public class CrystalLightingVis {
         for (int r = 0; r < H; ++r)
         for (int c = 0; c < W; ++c) {
             char tgt = targetBoard[r][c];
-            char res = resultBoard[r][c]; 
+            char res = resultBoard[r][c];
             if (tgt == 'X')
                 continue;
             if (tgt == '.') {
@@ -390,10 +390,10 @@ public class CrystalLightingVis {
             if (vis)
                 draw();
 
-            // Check for invalid lanterns. This is done after visualization (if enabled). 
-            for (int i = 0; i < itemsRet.length; ++i) { 
-                Item item = addedItems.get(i); 
-                if (item.isLantern() && !item.valid) { 
+            // Check for invalid lanterns. This is done after visualization (if enabled).
+            for (int i = 0; i < itemsRet.length; ++i) {
+                Item item = addedItems.get(i);
+                if (item.isLantern() && !item.valid) {
                     addFatalError("Item " + i + ": A lantern should not be illuminated by any light ray.");
                     return invalidScore;
                 }
@@ -407,16 +407,16 @@ public class CrystalLightingVis {
             // wait till player finishes (possibly on top of automated return)
             while (!manualReady)
             {   try { Thread.sleep(50);}
-                catch (Exception e) { e.printStackTrace(); } 
+                catch (Exception e) { e.printStackTrace(); }
             }
             // don't convert manually placed lanterns to return value
         }
 
         return getScore();
       }
-      catch (Exception e) { 
+      catch (Exception e) {
         addFatalError("An exception occurred while trying to get your program's results.");
-        e.printStackTrace(); 
+        e.printStackTrace();
         return invalidScore;
       }
     }
@@ -460,14 +460,16 @@ public class CrystalLightingVis {
         v.repaint();
     }
     // -----------------------------------------
-    // RYB: 001 = blue,  010 = yellow, 100 = red, 
+    // RYB: 001 = blue,  010 = yellow, 100 = red,
     //      011 = green, 101 = violet, 110 = orange
     //      000 = white (not drawn)
     //                   white     blue      yellow    green     red       violet    orange    brown
     int[] lightColor =  {0xFFFFFF, 0x0066FF, 0xF0F000, 0x33FF33, 0xFF4D4D, 0xE600E6, 0xFFAD31, 0x663300};
     int[] targetColor = {0xFFFFFF, 0x0000CC, 0xE0E000, 0x00EE00, 0xEE0000, 0xAA00AA, 0xFF9900, 0x663300};
     // -----------------------------------------
-    public class Vis extends JPanel implements MouseListener, WindowListener {
+    public class Vis extends JPanel implements MouseListener, WindowListener, MouseMotionListener {
+      private int lastMouseX = 0;
+      private int lastMouseY = 0;
         public void paint(Graphics g) {
             super.paint(g);
             Dimension dim = getVisDimension();
@@ -544,7 +546,7 @@ public class CrystalLightingVis {
                     g2.setColor(new Color(lightColor[item.getColor()]));
                     g2.fillOval(c0 - SZ/6, r0 - SZ/6, SZ/3, SZ/3);
                     continue;
-                } 
+                }
                 g2.setColor(Color.DARK_GRAY);
                 if (item.type == 'X') {
                     //Added obstacles, as a small square in the cell center
@@ -649,9 +651,9 @@ public class CrystalLightingVis {
                 if (item.isLantern()) {
                     numLantern++;
                     if (!item.valid) numInvalidLanterns++;
-                } else if (item.isMirror()) 
+                } else if (item.isMirror())
                     numMirror++;
-                else if (item.isObstacle()) 
+                else if (item.isObstacle())
                     numObstacle++;
             }
             drawString(g2,"ADDED ITEMS",xText,yText,wText,hText,0);
@@ -686,6 +688,13 @@ public class CrystalLightingVis {
             drawString(g2,"Incorrect:",xText,yText,wText*2/3,hText,1);
             drawString(g2,String.valueOf(numIncorrect),xText+wText*2/3+2,yText,wText/3,hText,-1);
 
+            yText += hText * 2;
+            drawString(g2,"X:",xText,yText,wText*2/3,hText,1);
+            drawString(g2,String.valueOf((lastMouseX+1) / SZ),xText+wText*2/3+2,yText,wText/3,hText,-1);
+            yText += hText;
+            drawString(g2,"Y:",xText,yText,wText*2/3,hText,1);
+            drawString(g2,String.valueOf((lastMouseY+1) / SZ),xText+wText*2/3+2,yText,wText/3,hText,-1);
+
             if (save) {
                 try {
                     ImageIO.write(bi,"png", new File(seed + ".png"));
@@ -708,6 +717,7 @@ public class CrystalLightingVis {
         // -------------------------------------
         public Vis() {
             addMouseListener(this);
+            addMouseMotionListener(this);
             jf.addWindowListener(this);
         }
         // -------------------------------------
@@ -716,11 +726,11 @@ public class CrystalLightingVis {
         }
         // -------------------------------------
         // WindowListener
-        public void windowClosing(WindowEvent e){ 
+        public void windowClosing(WindowEvent e){
             if(proc != null)
-                try { proc.destroy(); } 
+                try { proc.destroy(); }
                 catch (Exception ex) { ex.printStackTrace(); }
-            System.exit(0); 
+            System.exit(0);
         }
         public void windowActivated(WindowEvent e) { }
         public void windowDeactivated(WindowEvent e) { }
@@ -782,7 +792,7 @@ public class CrystalLightingVis {
             }
             if (SwingUtilities.isLeftMouseButton(e)) {
                 // left click adds a new item or changes the existing one
-                // changing is implemented as removal followed by addition 
+                // changing is implemented as removal followed by addition
                 char type = 0;
                 for (int i = 0; i < addedItems.size(); ++i) {
                     Item item = addedItems.get(i);
@@ -791,14 +801,14 @@ public class CrystalLightingVis {
                         //Check if the next item type is available
                         int usedObstacles = 0;
                         int usedMirrors = 0;
-                        for(Item a : addedItems) { 
+                        for(Item a : addedItems) {
                             if (a.isObstacle()) usedObstacles++;
                             else if (a.isMirror()) usedMirrors++;
                         }
                         while(true) {
                             type = types[++idx % types.length];
-                            if (type == 'X' && usedObstacles >= maxObstacles) continue; //All obstacles used 
-                            if ((type == '\\' || type == '/') && item.type != '\\' && item.type != '/' && usedMirrors >= maxMirrors) continue;  //All mirrors used 
+                            if (type == 'X' && usedObstacles >= maxObstacles) continue; //All obstacles used
+                            if ((type == '\\' || type == '/') && item.type != '\\' && item.type != '/' && usedMirrors >= maxMirrors) continue;  //All mirrors used
                             break; //OK, accept this type
                         }
                     }
@@ -828,6 +838,12 @@ public class CrystalLightingVis {
         public void mouseReleased(MouseEvent e) { }
         public void mouseEntered(MouseEvent e) { }
         public void mouseExited(MouseEvent e) { }
+        public void mouseDragged(MouseEvent e) {}
+        public void mouseMoved(MouseEvent e) {
+          lastMouseX = e.getX();
+          lastMouseY = e.getY();
+          repaint();
+        }
     }
     // -----------------------------------------
     public CrystalLightingVis(String seed) {
@@ -851,7 +867,7 @@ public class CrystalLightingVis {
         }
         System.out.println("Score = " + runTest(seed));
         if (proc != null)
-            try { proc.destroy(); } 
+            try { proc.destroy(); }
             catch (Exception e) { e.printStackTrace(); }
       }
       catch (Exception e) { e.printStackTrace(); }

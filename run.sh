@@ -1,4 +1,7 @@
 #!/bin/bash -e
 
 make main.o CrystalLightingVis.class
-java CrystalLightingVis -exec "./main.o" -seed $1
+
+readonly SEED=$1
+shift
+java CrystalLightingVis -exec "./main.o" -seed ${SEED} "$@"
