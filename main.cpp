@@ -5,6 +5,7 @@
 #include <iostream>
 #include <map>
 #include <numeric>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -32,6 +33,28 @@ constexpr uint8_t OBSTACLE = (0x3 << 6);
 constexpr uint8_t LANTERN_MASK = 0x7;
 constexpr uint8_t CRYSTAL_MASK = (0x7 << 3);
 constexpr uint8_t ITEM_MASK = (0x3 << 6);
+
+// Timer implementation based on nika's submission.
+// http://community.topcoder.com/longcontest/?module=ViewProblemSolution&pm=14907&rd=17153&cr=20315020&subnum=17
+class Timer {
+ public:
+  void Start() { start_seconds_ = GetSeconds(); }
+
+  inline double GetNormalizedTime() const {
+    return min((GetSeconds() - start_seconds_) / TIME_LIMIT_SECONDS, 0.9999);
+  }
+
+ private:
+  inline uint64_t GetTSC() const {
+    uint64_t lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return lo + (hi << 32);
+  }
+  inline double GetSeconds() const { return GetTSC() / 2.79e9; }
+
+  double start_seconds_;
+  static constexpr double TIME_LIMIT_SECONDS = 10;
+};
 
 struct LanternLookupMetadata {
   int x;
@@ -253,14 +276,12 @@ struct Board {
       while (true) {
         x += DIR_X[dir];
         y += DIR_Y[dir];
-        if (!IsInBound(x, y)) {
+        if (x == lantern_x && y == lantern_y) {
+          break;
+        } else if (!IsInBound(x, y)) {
           break;
         } else if (IsObstacle(x, y)) {
           break;
-        } else if (IsLantern(x, y)) {
-          if (x == lantern_x && y == lantern_y) {
-            break;
-          }
         } else if (IsSlashMirror(x, y)) {
           dir = MIRROR_S_TO[dir];
         } else if (IsBackslashMirror(x, y)) {
@@ -325,7 +346,7 @@ struct Board {
     return valid;
   }
 
-  void RemoveItem(int item_x, int item_y) {
+  bool RemoveItem(int item_x, int item_y) {
     assert(GetCell(item_x, item_y) & ITEM_MASK);
 
     set<LanternLookupMetadata> lanterns_to_process;
@@ -344,9 +365,11 @@ struct Board {
 
     SetCell(item_x, item_y, EMPTY_CELL);
 
+    bool valid = true;
     for (const auto& l : lanterns_to_process) {
-      PutLantern(l.x, l.y, l.color);
+      valid &= PutLantern(l.x, l.y, l.color);
     }
+    return valid;
   }
 
   void PutObstacle(int obstacle_x, int obstacle_y) {
@@ -355,11 +378,12 @@ struct Board {
     obstacles.emplace(Pos{obstacle_x, obstacle_y});
   }
 
-  void RemoveObstacle(int obstacle_x, int obstacle_y) {
+  bool RemoveObstacle(int obstacle_x, int obstacle_y) {
     assert(IsObstacle(obstacle_x, obstacle_y));
     assert(obstacles.find({obstacle_x, obstacle_y}) != obstacles.end());
-    RemoveItem(obstacle_x, obstacle_y);
+    bool valid = RemoveItem(obstacle_x, obstacle_y);
     obstacles.erase({obstacle_x, obstacle_y});
+    return valid;
   }
 
   bool PutMirror(int mirror_x, int mirror_y, uint8_t type) {
@@ -370,20 +394,22 @@ struct Board {
     return valid;
   }
 
-  void RemoveMirror(int mirror_x, int mirror_y) {
+  bool RemoveMirror(int mirror_x, int mirror_y) {
     assert(IsSlashMirror(mirror_x, mirror_y) ||
            IsBackslashMirror(mirror_x, mirror_y));
     assert(mirrors.find({mirror_x, mirror_y}) != mirrors.end());
-    RemoveItem(mirror_x, mirror_y);
+    bool valid = RemoveItem(mirror_x, mirror_y);
     mirrors.erase({mirror_x, mirror_y});
+    return valid;
   }
 };
 
 class Solver {
  public:
-  Solver(const Board& initial_board, int cost_lantern, int cost_mirror,
-         int cost_obstacle, int max_mirrors, int max_obstacles)
-      : board_width_(initial_board.w),
+  Solver(const Timer& timer, const Board& initial_board, int cost_lantern,
+         int cost_mirror, int cost_obstacle, int max_mirrors, int max_obstacles)
+      : timer_(&timer),
+        board_width_(initial_board.w),
         board_height_(initial_board.h),
         initial_board_(initial_board),
         cost_lantern_(cost_lantern),
@@ -402,99 +428,112 @@ class Solver {
            board_.mirrors.size() * cost_mirror_;
   }
 
-  vector<string> Solve() {
-    auto find_best_move = [&]() {
-      int best_score = GetScore();
-      int best_x, best_y, best_move = 0;
-      for (int i = 0; i < board_width_; ++i) {
-        for (int j = 0; j < board_height_; ++j) {
-          if (board_.IsEmpty(i, j) && !board_.HasAnyLanternInfo(i, j)) {
-            for (int k = 0; k < 3; ++k) {
-              int prev_score = GetScore();
-              bool valid = board_.PutLantern(i, j, (1 << k));
-              int score = GetScore();
-              if (valid && best_score < score) {
-                best_score = score;
-                best_x = i;
-                best_y = j;
-                best_move = (1 << k);
+  double GetEnergy() const { return -GetScore() * 0.1; }
+
+  double GetTemperature() const { return 1.0 - timer_->GetNormalizedTime(); }
+
+  void SimulatedAnnealing() {
+    mt19937 gen;
+    vector<Pos> available_positions;
+    for (int y = 0; y < board_height_; ++y) {
+      for (int x = 0; x < board_width_; ++x) {
+        if (board_.IsEmpty(x, y)) {
+          available_positions.emplace_back(Pos{x, y});
+        }
+      }
+    }
+    uniform_int_distribution<int> rand_next_pos(0,
+                                                available_positions.size() - 1);
+    uniform_real_distribution<double> rand_prob(0, 1);
+
+    double energy = GetEnergy();
+    auto should_accept = [&energy, &rand_prob, &gen, this]() {
+      double new_energy = GetEnergy();
+      return new_energy < energy ||
+             rand_prob(gen) < exp(-(new_energy - energy) / GetTemperature());
+    };
+    while (timer_->GetNormalizedTime() < 0.95) {
+#ifdef LOCAL_DEBUG_MODE
+      static double next_report_time = 0;
+      if (next_report_time < timer_->GetNormalizedTime()) {
+        cerr << "time: " << next_report_time << endl;
+        cerr << "temp: " << GetTemperature() << endl;
+        cerr << "energy: " << energy << endl;
+        cerr << "score: " << GetScore() << endl;
+        next_report_time += 0.1;
+      }
+#endif
+
+      const auto& next_pos = available_positions[rand_next_pos(gen)];
+      int x = next_pos.first;
+      int y = next_pos.second;
+      if (board_.IsEmpty(x, y)) {
+        if (board_.HasAnyLanternInfo(x, y)) {
+          uint8_t item_type = uniform_int_distribution<int>(1, 3)(gen) << 6;
+          if (item_type == OBSTACLE) {
+            if (board_.obstacles.size() < max_obstacles_) {
+              board_.PutObstacle(x, y);
+              if (should_accept()) {
+                energy = GetEnergy();
+              } else {
+                board_.RemoveObstacle(x, y);
               }
-              board_.RemoveLantern(i, j, (1 << k));
-              assert(prev_score == GetScore());
+            }
+          } else {
+            if (board_.mirrors.size() < max_mirrors_) {
+              bool valid = board_.PutMirror(x, y, item_type);
+              if (valid && should_accept()) {
+                energy = GetEnergy();
+              } else {
+                board_.RemoveMirror(x, y);
+              }
             }
           }
-          if (board_.obstacles.size() < max_obstacles_ &&
-              board_.IsEmpty(i, j) && board_.HasAnyLanternInfo(i, j)) {
-            int prev_score = GetScore();
-            board_.PutObstacle(i, j);
-            int score = GetScore();
-            if (best_score < score) {
-              best_score = score;
-              best_x = i;
-              best_y = j;
-              best_move = OBSTACLE;
-            }
-            board_.RemoveObstacle(i, j);
-            assert(prev_score == GetScore());
+        } else {
+          uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
+          bool valid = board_.PutLantern(x, y, color);
+          if (valid && should_accept()) {
+            energy = GetEnergy();
+          } else {
+            board_.RemoveLantern(x, y, color);
           }
-          if (board_.mirrors.size() < max_mirrors_ && board_.IsEmpty(i, j) &&
-              board_.HasAnyLanternInfo(i, j)) {
-            int prev_score = GetScore();
-            for (int k = 0; k < 2; ++k) {
-              bool valid =
-                  board_.PutMirror(i, j, k ? SLASH_MIRROR : BACKSLASH_MIRROR);
-              int score = GetScore();
-              if (valid && best_score < score) {
-                best_score = score;
-                best_x = i;
-                best_y = j;
-                best_move = k ? SLASH_MIRROR : BACKSLASH_MIRROR;
-              }
-              board_.RemoveMirror(i, j);
-              assert(prev_score == GetScore());
-            }
+        }
+      } else {
+        if (board_.IsLantern(x, y)) {
+          uint8_t color = board_.GetCell(x, y);
+          board_.RemoveLantern(x, y, color);
+          if (should_accept()) {
+            energy = GetEnergy();
+          } else {
+            board_.PutLantern(x, y, color);
+          }
+        } else if (board_.IsObstacle(x, y)) {
+          bool valid = board_.RemoveObstacle(x, y);
+          if (valid && should_accept()) {
+            energy = GetEnergy();
+          } else {
+            board_.PutObstacle(x, y);
+          }
+        } else if (board_.IsSlashMirror(x, y) ||
+                   board_.IsBackslashMirror(x, y)) {
+          uint8_t type = board_.GetCell(x, y);
+          bool valid = board_.RemoveMirror(x, y);
+          if (valid && should_accept()) {
+            energy = GetEnergy();
+          } else {
+            board_.PutMirror(x, y, type);
           }
         }
       }
-      return make_tuple(best_score, best_x, best_y, best_move);
-    };
-
-    int score = 0;
-    while (true) {
-      int next_score, next_x, next_y, next_move;
-      tie(next_score, next_x, next_y, next_move) = find_best_move();
-      if (next_score <= score) {
-        break;
-      }
-
-      if (next_move & LANTERN_MASK) {
-        bool valid = board_.PutLantern(next_x, next_y, next_move);
-        assert(valid);
-        assert(next_score == GetScore());
-
-        score = next_score;
-
-        cerr << "(" << next_x << ", " << next_y << "), col = " << next_move
-             << ", score = " << score << endl;
-      } else if (next_move == OBSTACLE) {
-        board_.PutObstacle(next_x, next_y);
-        assert(next_score == GetScore());
-
-        score = next_score;
-
-        cerr << "(" << next_x << ", " << next_y << "), obstacle"
-             << ", score = " << score << endl;
-      } else if (next_move == SLASH_MIRROR || next_move == BACKSLASH_MIRROR) {
-        board_.PutMirror(next_x, next_y, next_move);
-        assert(next_score == GetScore());
-
-        score = next_score;
-
-        cerr << "(" << next_x << ", " << next_y << "), mirror_"
-             << (next_move == SLASH_MIRROR ? "s" : "b") << ", score = " << score
-             << endl;
-      }
     }
+  }
+
+  vector<string> Solve() {
+    SimulatedAnnealing();
+
+#ifdef LOCAL_DEBUG_MODE
+    cerr << "Final score = " << GetScore() << endl;
+#endif
 
     vector<string> ret;
     for (const auto& l : board_.lanterns) {
@@ -517,6 +556,7 @@ class Solver {
   }
 
  private:
+  const Timer* timer_;
   const int board_width_;
   const int board_height_;
   const Board initial_board_;
@@ -534,6 +574,8 @@ class CrystalLighting {
   vector<string> placeItems(vector<string> target_board, int cost_lantern,
                             int cost_mirror, int cost_obstacle, int max_mirrors,
                             int max_obstacles) {
+    Timer timer;
+    timer.Start();
     Board board;
     board.w = target_board[0].size();
     board.h = target_board.size();
@@ -552,7 +594,7 @@ class CrystalLighting {
     for (int dir = 0; dir < 4; ++dir) {
       board.lantern_lookup[dir].resize(board.w * board.h);
     }
-    return Solver(move(board), cost_lantern, cost_mirror, cost_obstacle,
+    return Solver(timer, board, cost_lantern, cost_mirror, cost_obstacle,
                   max_mirrors, max_obstacles)
         .Solve();
   }
