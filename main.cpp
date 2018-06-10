@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdlib>
 #include <iostream>
@@ -71,9 +72,9 @@ struct Board {
   int w, h;
   vector<uint8_t> cells;
   set<Pos> obstacles;
+  set<Pos> mirrors;
   set<LanternLookupMetadata> lanterns;
-  vector<set<LanternLookupMetadata>> lantern_lookup_h;
-  vector<set<LanternLookupMetadata>> lantern_lookup_v;
+  array<vector<set<LanternLookupMetadata>>, 4> lantern_lookup;
   set<Pos> lit_crystals;
   set<Pos> lit_compound_crystals;
   set<Pos> lit_wrong_crystals;
@@ -84,64 +85,53 @@ struct Board {
 
   inline uint8_t GetCell(int x, int y) const { return cells[y * w + x]; }
 
-  inline void AddLanternH(int x, int y, int lantern_x, int lantern_y,
-                          uint8_t lantern_color) {
-    lantern_lookup_h[y * w + x].emplace(
+  inline void AddLanternInfo(int x, int y, int dir, int lantern_x,
+                             int lantern_y, uint8_t lantern_color) {
+    lantern_lookup[dir][y * w + x].emplace(
         LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
   }
 
-  inline void RemoveLanternH(int x, int y, int lantern_x, int lantern_y,
-                             uint8_t lantern_color) {
-    lantern_lookup_h[y * w + x].erase({lantern_x, lantern_y, lantern_color});
+  inline void RemoveLanternInfo(int x, int y, int dir, int lantern_x,
+                                int lantern_y, uint8_t lantern_color) {
+    lantern_lookup[dir][y * w + x].erase({lantern_x, lantern_y, lantern_color});
   }
 
-  inline const set<LanternLookupMetadata>& GetLanternH(int x, int y) const {
-    return lantern_lookup_h[y * w + x];
+  inline const set<LanternLookupMetadata>& GetLanternInfo(int x, int y,
+                                                          int dir) const {
+    return lantern_lookup[dir][y * w + x];
   }
 
-  inline void AddLanternV(int x, int y, int lantern_x, int lantern_y,
-                          uint8_t lantern_color) {
-    lantern_lookup_v[y * w + x].emplace(
-        LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
-  }
-
-  inline void RemoveLanternV(int x, int y, int lantern_x, int lantern_y,
-                             uint8_t lantern_color) {
-    lantern_lookup_v[y * w + x].erase({lantern_x, lantern_y, lantern_color});
-  }
-
-  inline const set<LanternLookupMetadata>& GetLanternV(int x, int y) const {
-    return lantern_lookup_v[y * w + x];
+  inline bool HasAnyLanternInfo(int x, int y) const {
+    for (int i = 0; i < 4; ++i) {
+      if (!GetLanternInfo(x, y, i).empty()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   inline uint8_t GetLitColor(int x, int y) const {
     uint8_t color = 0;
-    color |= IsInBound(x + 1, y) ? CompoundColor(GetLanternH(x + 1, y)) : 0;
-    color |= IsInBound(x - 1, y) ? CompoundColor(GetLanternH(x - 1, y)) : 0;
-    color |= IsInBound(x, y + 1) ? CompoundColor(GetLanternV(x, y + 1)) : 0;
-    color |= IsInBound(x, y - 1) ? CompoundColor(GetLanternV(x, y - 1)) : 0;
+    for (int dir = 0; dir < 4; ++dir) {
+      int x2 = x - DIR_X[dir];
+      int y2 = y - DIR_Y[dir];
+      color |=
+          IsInBound(x2, y2) ? CompoundColor(GetLanternInfo(x2, y2, dir)) : 0;
+    }
     return color;
   }
 
   inline uint8_t GetLitColor(int x, int y, int exclude_x, int exclude_y,
                              uint8_t exclude_color) const {
     uint8_t color = 0;
-    color |= IsInBound(x + 1, y)
-                 ? CompoundColor(GetLanternH(x + 1, y),
-                                 {exclude_x, exclude_y, exclude_color})
-                 : 0;
-    color |= IsInBound(x - 1, y)
-                 ? CompoundColor(GetLanternH(x - 1, y),
-                                 {exclude_x, exclude_y, exclude_color})
-                 : 0;
-    color |= IsInBound(x, y + 1)
-                 ? CompoundColor(GetLanternV(x, y + 1),
-                                 {exclude_x, exclude_y, exclude_color})
-                 : 0;
-    color |= IsInBound(x, y - 1)
-                 ? CompoundColor(GetLanternV(x, y - 1),
-                                 {exclude_x, exclude_y, exclude_color})
-                 : 0;
+    for (int dir = 0; dir < 4; ++dir) {
+      int x2 = x - DIR_X[dir];
+      int y2 = y - DIR_Y[dir];
+      color |= IsInBound(x2, y2)
+                   ? CompoundColor(GetLanternInfo(x2, y2, dir),
+                                   {exclude_x, exclude_y, exclude_color})
+                   : 0;
+    }
     return color;
   }
 
@@ -188,8 +178,10 @@ struct Board {
     lanterns.emplace(
         LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, lantern_color);
-    AddLanternH(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
-    AddLanternV(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
+    for (int d = 0; d < 4; ++d) {
+      AddLanternInfo(lantern_x, lantern_y, d, lantern_x, lantern_y,
+                     lantern_color);
+    }
 
     bool valid = true;
     for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
@@ -235,11 +227,7 @@ struct Board {
           break;
         }
 
-        if (dir % 2) {
-          AddLanternH(x, y, lantern_x, lantern_y, lantern_color);
-        } else {
-          AddLanternV(x, y, lantern_x, lantern_y, lantern_color);
-        }
+        AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
       }
     }
 
@@ -252,8 +240,10 @@ struct Board {
 
     lanterns.erase({lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, EMPTY_CELL);
-    RemoveLanternH(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
-    RemoveLanternV(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
+    for (int d = 0; d < 4; ++d) {
+      RemoveLanternInfo(lantern_x, lantern_y, d, lantern_x, lantern_y,
+                        lantern_color);
+    }
 
     int score_diff = 0;
     for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
@@ -307,53 +297,44 @@ struct Board {
           break;
         }
 
-        if (dir % 2) {
-          RemoveLanternH(x, y, lantern_x, lantern_y, lantern_color);
-        } else {
-          RemoveLanternV(x, y, lantern_x, lantern_y, lantern_color);
-        }
+        RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
       }
     }
     return score_diff;
   }
 
-  void PutObstacle(int obstacle_x, int obstacle_y) {
-    assert(IsEmpty(obstacle_x, obstacle_y));
+  bool PutItem(int item_x, int item_y, uint8_t item) {
+    assert(IsEmpty(item_x, item_y));
 
     set<LanternLookupMetadata> lanterns_to_process;
-    const auto& l_v = GetLanternV(obstacle_x, obstacle_y);
-    lanterns_to_process.insert(l_v.begin(), l_v.end());
-    const auto& l_h = GetLanternH(obstacle_x, obstacle_y);
-    lanterns_to_process.insert(l_h.begin(), l_h.end());
+    for (int d = 0; d < 4; ++d) {
+      const auto& l = GetLanternInfo(item_x, item_y, d);
+      lanterns_to_process.insert(l.begin(), l.end());
+    }
 
     for (const auto& l : lanterns_to_process) {
       RemoveLantern(l.x, l.y, l.color);
     }
 
-    SetCell(obstacle_x, obstacle_y, OBSTACLE);
-    obstacles.emplace(Pos{obstacle_x, obstacle_y});
+    SetCell(item_x, item_y, item);
 
+    bool valid = true;
     for (const auto& l : lanterns_to_process) {
-      PutLantern(l.x, l.y, l.color);
+      valid &= PutLantern(l.x, l.y, l.color);
     }
+    return valid;
   }
 
-  void RemoveObstacle(int obstacle_x, int obstacle_y) {
-    assert(IsObstacle(obstacle_x, obstacle_y));
-    assert(obstacles.find({obstacle_x, obstacle_y}) != obstacles.end());
+  void RemoveItem(int item_x, int item_y) {
+    assert(GetCell(item_x, item_y) & ITEM_MASK);
 
     set<LanternLookupMetadata> lanterns_to_process;
     for (int i = 0; i < 4; ++i) {
-      int x = obstacle_x + DIR_X[i];
-      int y = obstacle_y + DIR_Y[i];
+      int x = item_x - DIR_X[i];
+      int y = item_y - DIR_Y[i];
       if (IsInBound(x, y)) {
-        if (i % 2) {
-          const auto& l = GetLanternH(x, y);
-          lanterns_to_process.insert(l.begin(), l.end());
-        } else {
-          const auto& l = GetLanternV(x, y);
-          lanterns_to_process.insert(l.begin(), l.end());
-        }
+        const auto& l = GetLanternInfo(x, y, i);
+        lanterns_to_process.insert(l.begin(), l.end());
       }
     }
 
@@ -361,12 +342,40 @@ struct Board {
       RemoveLantern(l.x, l.y, l.color);
     }
 
-    SetCell(obstacle_x, obstacle_y, EMPTY_CELL);
-    obstacles.erase({obstacle_x, obstacle_y});
+    SetCell(item_x, item_y, EMPTY_CELL);
 
     for (const auto& l : lanterns_to_process) {
       PutLantern(l.x, l.y, l.color);
     }
+  }
+
+  void PutObstacle(int obstacle_x, int obstacle_y) {
+    assert(IsEmpty(obstacle_x, obstacle_y));
+    PutItem(obstacle_x, obstacle_y, OBSTACLE);
+    obstacles.emplace(Pos{obstacle_x, obstacle_y});
+  }
+
+  void RemoveObstacle(int obstacle_x, int obstacle_y) {
+    assert(IsObstacle(obstacle_x, obstacle_y));
+    assert(obstacles.find({obstacle_x, obstacle_y}) != obstacles.end());
+    RemoveItem(obstacle_x, obstacle_y);
+    obstacles.erase({obstacle_x, obstacle_y});
+  }
+
+  bool PutMirror(int mirror_x, int mirror_y, uint8_t type) {
+    assert(IsEmpty(mirror_x, mirror_y));
+    assert(type == SLASH_MIRROR || type == BACKSLASH_MIRROR);
+    bool valid = PutItem(mirror_x, mirror_y, type);
+    mirrors.emplace(Pos{mirror_x, mirror_y});
+    return valid;
+  }
+
+  void RemoveMirror(int mirror_x, int mirror_y) {
+    assert(IsSlashMirror(mirror_x, mirror_y) ||
+           IsBackslashMirror(mirror_x, mirror_y));
+    assert(mirrors.find({mirror_x, mirror_y}) != mirrors.end());
+    RemoveItem(mirror_x, mirror_y);
+    mirrors.erase({mirror_x, mirror_y});
   }
 };
 
@@ -389,7 +398,8 @@ class Solver {
            board_.lit_compound_crystals.size() * 30 -
            board_.lit_wrong_crystals.size() * 10 -
            board_.lanterns.size() * cost_lantern_ -
-           board_.obstacles.size() * cost_obstacle_;
+           board_.obstacles.size() * cost_obstacle_ -
+           board_.mirrors.size() * cost_mirror_;
   }
 
   vector<string> Solve() {
@@ -398,8 +408,7 @@ class Solver {
       int best_x, best_y, best_move = 0;
       for (int i = 0; i < board_width_; ++i) {
         for (int j = 0; j < board_height_; ++j) {
-          if (board_.IsEmpty(i, j) && board_.GetLanternH(i, j).empty() &&
-              board_.GetLanternV(i, j).empty()) {
+          if (board_.IsEmpty(i, j) && !board_.HasAnyLanternInfo(i, j)) {
             for (int k = 0; k < 3; ++k) {
               int prev_score = GetScore();
               bool valid = board_.PutLantern(i, j, (1 << k));
@@ -415,9 +424,7 @@ class Solver {
             }
           }
           if (board_.obstacles.size() < max_obstacles_ &&
-              board_.IsEmpty(i, j) &&
-              (!board_.GetLanternH(i, j).empty() ||
-               !board_.GetLanternV(i, j).empty())) {
+              board_.IsEmpty(i, j) && board_.HasAnyLanternInfo(i, j)) {
             int prev_score = GetScore();
             board_.PutObstacle(i, j);
             int score = GetScore();
@@ -429,6 +436,23 @@ class Solver {
             }
             board_.RemoveObstacle(i, j);
             assert(prev_score == GetScore());
+          }
+          if (board_.mirrors.size() < max_mirrors_ && board_.IsEmpty(i, j) &&
+              board_.HasAnyLanternInfo(i, j)) {
+            int prev_score = GetScore();
+            for (int k = 0; k < 2; ++k) {
+              bool valid =
+                  board_.PutMirror(i, j, k ? SLASH_MIRROR : BACKSLASH_MIRROR);
+              int score = GetScore();
+              if (valid && best_score < score) {
+                best_score = score;
+                best_x = i;
+                best_y = j;
+                best_move = k ? SLASH_MIRROR : BACKSLASH_MIRROR;
+              }
+              board_.RemoveMirror(i, j);
+              assert(prev_score == GetScore());
+            }
           }
         }
       }
@@ -460,6 +484,15 @@ class Solver {
 
         cerr << "(" << next_x << ", " << next_y << "), obstacle"
              << ", score = " << score << endl;
+      } else if (next_move == SLASH_MIRROR || next_move == BACKSLASH_MIRROR) {
+        board_.PutMirror(next_x, next_y, next_move);
+        assert(next_score == GetScore());
+
+        score = next_score;
+
+        cerr << "(" << next_x << ", " << next_y << "), mirror_"
+             << (next_move == SLASH_MIRROR ? "s" : "b") << ", score = " << score
+             << endl;
       }
     }
 
@@ -472,6 +505,12 @@ class Solver {
     for (const auto& o : board_.obstacles) {
       stringstream ss;
       ss << o.second << " " << o.first << " X";
+      ret.push_back(ss.str());
+    }
+    for (const auto& m : board_.mirrors) {
+      stringstream ss;
+      ss << m.second << " " << m.first << " "
+         << (board_.GetCell(m.first, m.second) == SLASH_MIRROR ? "/" : "\\");
       ret.push_back(ss.str());
     }
     return ret;
@@ -510,8 +549,9 @@ class CrystalLighting {
         }
       }
     }
-    board.lantern_lookup_h.resize(board.w * board.h);
-    board.lantern_lookup_v.resize(board.w * board.h);
+    for (int dir = 0; dir < 4; ++dir) {
+      board.lantern_lookup[dir].resize(board.w * board.h);
+    }
     return Solver(move(board), cost_lantern, cost_mirror, cost_obstacle,
                   max_mirrors, max_obstacles)
         .Solve();
