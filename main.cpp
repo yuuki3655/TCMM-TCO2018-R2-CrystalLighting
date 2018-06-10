@@ -65,11 +65,17 @@ constexpr int DIR_Y[] = {-1, 0, 1, 0};
 constexpr int MIRROR_S_TO[] = {1, 0, 3, 2};
 constexpr int MIRROR_B_TO[] = {3, 2, 1, 0};
 
+typedef pair<int, int> Pos;
+
 struct Board {
   int w, h;
   vector<uint8_t> cells;
+  set<LanternLookupMetadata> lanterns;
   vector<set<LanternLookupMetadata>> lantern_lookup_h;
   vector<set<LanternLookupMetadata>> lantern_lookup_v;
+  set<Pos> lit_crystals;
+  set<Pos> lit_compound_crystals;
+  set<Pos> lit_wrong_crystals;
 
   inline void SetCell(int x, int y, uint8_t cell_value) {
     cells[y * w + x] = cell_value;
@@ -175,15 +181,15 @@ struct Board {
     return GetCell(x, y) == BACKSLASH_MIRROR;
   }
 
-  pair<int, bool> PutLantern(int lantern_x, int lantern_y, int lantern_color) {
-    if (!IsEmpty(lantern_x, lantern_y)) return make_pair(0, false);
+  bool PutLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
+    assert(IsEmpty(lantern_x, lantern_y));
 
+    lanterns.emplace(LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, lantern_color);
     AddLanternH(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
     AddLanternV(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
 
     bool valid = true;
-    int score_diff = 0;
     for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
       int dir = initial_dir;
       int x = lantern_x;
@@ -205,18 +211,24 @@ struct Board {
         } else if (IsBackslashMirror(x, y)) {
           dir = MIRROR_B_TO[dir];
         } else if (IsCrystal(x, y)) {
-          uint8_t prev_lit_color =
-              GetLitColor(x, y, lantern_x, lantern_y, lantern_color);
           uint8_t lit_color = GetLitColor(x, y);
           uint8_t crystal_color = GetCrystalColor(x, y);
-          if (prev_lit_color == 0 && lit_color == crystal_color) {
-            score_diff += IsSecondaryColorCrystal(x, y) ? 30 : 20;
-          } else if (prev_lit_color == 0 && lit_color != crystal_color) {
-            score_diff -= 10;
-          } else if (prev_lit_color == crystal_color &&
-                     lit_color != crystal_color) {
-            score_diff -= IsSecondaryColorCrystal(x, y) ? 30 : 20;
-            score_diff -= 10;
+          if (lit_color == crystal_color) {
+            if (IsSecondaryColorCrystal(x, y)) {
+              lit_compound_crystals.emplace(Pos{x, y});
+              lit_wrong_crystals.erase({x, y});
+            } else {
+              lit_crystals.emplace(Pos{x, y});
+              lit_wrong_crystals.erase({x, y});
+            }
+          } else {
+            if (IsSecondaryColorCrystal(x, y)) {
+              lit_compound_crystals.erase({x, y});
+              lit_wrong_crystals.emplace(Pos{x, y});
+            } else {
+              lit_crystals.erase({x, y});
+              lit_wrong_crystals.emplace(Pos{x, y});
+            }
           }
           break;
         }
@@ -229,16 +241,19 @@ struct Board {
       }
     }
 
-    return make_pair(score_diff, valid);
+    return valid;
   }
 
-  void RemoveLantern(int lantern_x, int lantern_y, int lantern_color) {
+  int RemoveLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
     assert(IsLantern(lantern_x, lantern_y));
+    assert(GetCell(lantern_x, lantern_y) == lantern_color);
 
+    lanterns.erase({lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, EMPTY_CELL);
     RemoveLanternH(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
     RemoveLanternV(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
 
+    int score_diff = 0;
     for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
       int dir = initial_dir;
       int x = lantern_x;
@@ -259,6 +274,34 @@ struct Board {
         } else if (IsBackslashMirror(x, y)) {
           dir = MIRROR_B_TO[dir];
         } else if (IsCrystal(x, y)) {
+          uint8_t lit_color =
+              GetLitColor(x, y, lantern_x, lantern_y, lantern_color);
+          uint8_t crystal_color = GetCrystalColor(x, y);
+          if (lit_color == crystal_color) {
+            if (IsSecondaryColorCrystal(x, y)) {
+              lit_compound_crystals.emplace(Pos{x, y});
+              lit_wrong_crystals.erase({x, y});
+            } else {
+              lit_crystals.emplace(Pos{x, y});
+              lit_wrong_crystals.erase({x, y});
+            }
+          } else if (lit_color == 0) {
+            if (IsSecondaryColorCrystal(x, y)) {
+              lit_compound_crystals.erase({x, y});
+              lit_wrong_crystals.erase({x, y});
+            } else {
+              lit_crystals.erase({x, y});
+              lit_wrong_crystals.erase({x, y});
+            }
+          } else {
+            if (IsSecondaryColorCrystal(x, y)) {
+              lit_compound_crystals.erase({x, y});
+              lit_wrong_crystals.emplace(Pos{x, y});
+            } else {
+              lit_crystals.erase({x, y});
+              lit_wrong_crystals.emplace(Pos{x, y});
+            }
+          }
           break;
         }
 
@@ -269,6 +312,7 @@ struct Board {
         }
       }
     }
+    return score_diff;
   }
 };
 
@@ -286,47 +330,55 @@ class Solver {
         max_obstacles_(max_obstacles),
         board_(initial_board) {}
 
+  int GetScore() const {
+    return board_.lit_crystals.size() * 20 +
+           board_.lit_compound_crystals.size() * 30 -
+           board_.lit_wrong_crystals.size() * 10 -
+           board_.lanterns.size() * cost_lantern_;
+  }
+
   vector<string> Solve() {
     auto find_best_move = [&]() {
-      int best_score_diff = 0;
+      int best_score = 0;
       int best_x, best_y, best_color = 0;
       for (int i = 0; i < board_width_; ++i) {
         for (int j = 0; j < board_height_; ++j) {
-          if (board_.IsEmpty(i, j)) {
+          if (board_.IsEmpty(i, j) && board_.GetLanternH(i, j).empty() && board_.GetLanternV(i, j).empty()) {
             for (int k = 0; k < 3; ++k) {
-              int score_diff;
-              bool valid;
-              tie(score_diff, valid) = board_.PutLantern(i, j, (1 << k));
-              if (valid && best_score_diff < score_diff) {
-                best_score_diff = score_diff;
+              int prev_score = GetScore();
+              bool valid = board_.PutLantern(i, j, (1 << k));
+              int score = GetScore();
+              if (valid && best_score < score) {
+                best_score = score;
                 best_x = i;
                 best_y = j;
                 best_color = (1 << k);
               }
               board_.RemoveLantern(i, j, (1 << k));
+              assert(prev_score == GetScore());
             }
           }
         }
       }
-      return make_tuple(best_score_diff, best_x, best_y, best_color);
+      return make_tuple(best_score, best_x, best_y, best_color);
     };
 
     int score = 0;
     while (true) {
-      int score_diff, next_x, next_y, next_color;
-      tie(score_diff, next_x, next_y, next_color) = find_best_move();
-      if (score_diff <= 0) break;
+      int next_score, next_x, next_y, next_color;
+      tie(next_score, next_x, next_y, next_color) = find_best_move();
+      if (next_score <= score) {
+        break;
+      }
 
-      int s_diff;
-      bool valid;
-      tie(s_diff, valid) = board_.PutLantern(next_x, next_y, next_color);
+      bool valid = board_.PutLantern(next_x, next_y, next_color);
       assert(valid);
-      assert(s_diff == score_diff);
+      assert(next_score == GetScore());
 
-      score += score_diff;
+      score = next_score;
 
       cerr << "(" << next_x << ", " << next_y << "), col = " << next_color
-           << ", diff = " << score_diff << ", score = " << score << endl;
+           << ", score = " << score << endl;
     }
 
     vector<string> ret;
@@ -335,7 +387,6 @@ class Solver {
         if (board_.IsLantern(i, j)) {
           stringstream ss;
           ss << j << " " << i << " " << int(board_.GetCell(i, j));
-          cerr << "(" << ss.str() << "), ";
           ret.push_back(ss.str());
         }
       }
