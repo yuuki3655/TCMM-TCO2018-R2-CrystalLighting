@@ -70,6 +70,7 @@ typedef pair<int, int> Pos;
 struct Board {
   int w, h;
   vector<uint8_t> cells;
+  set<Pos> obstacles;
   set<LanternLookupMetadata> lanterns;
   vector<set<LanternLookupMetadata>> lantern_lookup_h;
   vector<set<LanternLookupMetadata>> lantern_lookup_v;
@@ -184,7 +185,8 @@ struct Board {
   bool PutLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
     assert(IsEmpty(lantern_x, lantern_y));
 
-    lanterns.emplace(LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
+    lanterns.emplace(
+        LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, lantern_color);
     AddLanternH(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
     AddLanternV(lantern_x, lantern_y, lantern_x, lantern_y, lantern_color);
@@ -314,6 +316,58 @@ struct Board {
     }
     return score_diff;
   }
+
+  void PutObstacle(int obstacle_x, int obstacle_y) {
+    assert(IsEmpty(obstacle_x, obstacle_y));
+
+    set<LanternLookupMetadata> lanterns_to_process;
+    const auto& l_v = GetLanternV(obstacle_x, obstacle_y);
+    lanterns_to_process.insert(l_v.begin(), l_v.end());
+    const auto& l_h = GetLanternH(obstacle_x, obstacle_y);
+    lanterns_to_process.insert(l_h.begin(), l_h.end());
+
+    for (const auto& l : lanterns_to_process) {
+      RemoveLantern(l.x, l.y, l.color);
+    }
+
+    SetCell(obstacle_x, obstacle_y, OBSTACLE);
+    obstacles.emplace(Pos{obstacle_x, obstacle_y});
+
+    for (const auto& l : lanterns_to_process) {
+      PutLantern(l.x, l.y, l.color);
+    }
+  }
+
+  void RemoveObstacle(int obstacle_x, int obstacle_y) {
+    assert(IsObstacle(obstacle_x, obstacle_y));
+    assert(obstacles.find({obstacle_x, obstacle_y}) != obstacles.end());
+
+    set<LanternLookupMetadata> lanterns_to_process;
+    for (int i = 0; i < 4; ++i) {
+      int x = obstacle_x + DIR_X[i];
+      int y = obstacle_y + DIR_Y[i];
+      if (IsInBound(x, y)) {
+        if (i % 2) {
+          const auto& l = GetLanternH(x, y);
+          lanterns_to_process.insert(l.begin(), l.end());
+        } else {
+          const auto& l = GetLanternV(x, y);
+          lanterns_to_process.insert(l.begin(), l.end());
+        }
+      }
+    }
+
+    for (const auto& l : lanterns_to_process) {
+      RemoveLantern(l.x, l.y, l.color);
+    }
+
+    SetCell(obstacle_x, obstacle_y, EMPTY_CELL);
+    obstacles.erase({obstacle_x, obstacle_y});
+
+    for (const auto& l : lanterns_to_process) {
+      PutLantern(l.x, l.y, l.color);
+    }
+  }
 };
 
 class Solver {
@@ -334,16 +388,18 @@ class Solver {
     return board_.lit_crystals.size() * 20 +
            board_.lit_compound_crystals.size() * 30 -
            board_.lit_wrong_crystals.size() * 10 -
-           board_.lanterns.size() * cost_lantern_;
+           board_.lanterns.size() * cost_lantern_ -
+           board_.obstacles.size() * cost_obstacle_;
   }
 
   vector<string> Solve() {
     auto find_best_move = [&]() {
-      int best_score = 0;
-      int best_x, best_y, best_color = 0;
+      int best_score = GetScore();
+      int best_x, best_y, best_move = 0;
       for (int i = 0; i < board_width_; ++i) {
         for (int j = 0; j < board_height_; ++j) {
-          if (board_.IsEmpty(i, j) && board_.GetLanternH(i, j).empty() && board_.GetLanternV(i, j).empty()) {
+          if (board_.IsEmpty(i, j) && board_.GetLanternH(i, j).empty() &&
+              board_.GetLanternV(i, j).empty()) {
             for (int k = 0; k < 3; ++k) {
               int prev_score = GetScore();
               bool valid = board_.PutLantern(i, j, (1 << k));
@@ -352,44 +408,71 @@ class Solver {
                 best_score = score;
                 best_x = i;
                 best_y = j;
-                best_color = (1 << k);
+                best_move = (1 << k);
               }
               board_.RemoveLantern(i, j, (1 << k));
               assert(prev_score == GetScore());
             }
           }
+          if (board_.obstacles.size() < max_obstacles_ &&
+              board_.IsEmpty(i, j) &&
+              (!board_.GetLanternH(i, j).empty() ||
+               !board_.GetLanternV(i, j).empty())) {
+            int prev_score = GetScore();
+            board_.PutObstacle(i, j);
+            int score = GetScore();
+            if (best_score < score) {
+              best_score = score;
+              best_x = i;
+              best_y = j;
+              best_move = OBSTACLE;
+            }
+            board_.RemoveObstacle(i, j);
+            assert(prev_score == GetScore());
+          }
         }
       }
-      return make_tuple(best_score, best_x, best_y, best_color);
+      return make_tuple(best_score, best_x, best_y, best_move);
     };
 
     int score = 0;
     while (true) {
-      int next_score, next_x, next_y, next_color;
-      tie(next_score, next_x, next_y, next_color) = find_best_move();
+      int next_score, next_x, next_y, next_move;
+      tie(next_score, next_x, next_y, next_move) = find_best_move();
       if (next_score <= score) {
         break;
       }
 
-      bool valid = board_.PutLantern(next_x, next_y, next_color);
-      assert(valid);
-      assert(next_score == GetScore());
+      if (next_move & LANTERN_MASK) {
+        bool valid = board_.PutLantern(next_x, next_y, next_move);
+        assert(valid);
+        assert(next_score == GetScore());
 
-      score = next_score;
+        score = next_score;
 
-      cerr << "(" << next_x << ", " << next_y << "), col = " << next_color
-           << ", score = " << score << endl;
+        cerr << "(" << next_x << ", " << next_y << "), col = " << next_move
+             << ", score = " << score << endl;
+      } else if (next_move == OBSTACLE) {
+        board_.PutObstacle(next_x, next_y);
+        assert(next_score == GetScore());
+
+        score = next_score;
+
+        cerr << "(" << next_x << ", " << next_y << "), obstacle"
+             << ", score = " << score << endl;
+      }
     }
 
     vector<string> ret;
-    for (int i = 0; i < board_width_; ++i) {
-      for (int j = 0; j < board_height_; ++j) {
-        if (board_.IsLantern(i, j)) {
-          stringstream ss;
-          ss << j << " " << i << " " << int(board_.GetCell(i, j));
-          ret.push_back(ss.str());
-        }
-      }
+    for (const auto& l : board_.lanterns) {
+      stringstream ss;
+      ss << l.y << " " << l.x << " " << int(l.color);
+      ret.push_back(ss.str());
+    }
+    for (const auto& o : board_.obstacles) {
+      stringstream ss;
+      ss << o.second << " " << o.first << " X";
+      ret.push_back(ss.str());
     }
     return ret;
   }
