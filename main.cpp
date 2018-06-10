@@ -1,3 +1,5 @@
+// Git Repository: https://github.com/yuuki3655/TCMM-TCO2018-R2-CrystalLighting
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -207,198 +209,182 @@ struct Board {
     return GetCell(x, y) == BACKSLASH_MIRROR;
   }
 
+  bool LayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
+                uint8_t lantern_color) {
+    bool valid = true;
+    AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
+    while (true) {
+      x += DIR_X[dir];
+      y += DIR_Y[dir];
+      if (!IsInBound(x, y)) {
+        break;
+      } else if (IsObstacle(x, y)) {
+        break;
+      } else if (IsLantern(x, y)) {
+        valid = false;
+        if (x == lantern_x && y == lantern_y) {
+          break;
+        }
+      } else if (IsSlashMirror(x, y)) {
+        dir = MIRROR_S_TO[dir];
+      } else if (IsBackslashMirror(x, y)) {
+        dir = MIRROR_B_TO[dir];
+      } else if (IsCrystal(x, y)) {
+        uint8_t lit_color = GetLitColor(x, y);
+        uint8_t crystal_color = GetCrystalColor(x, y);
+        if (lit_color == crystal_color) {
+          if (IsSecondaryColorCrystal(x, y)) {
+            lit_compound_crystals.emplace(Pos{x, y});
+            lit_wrong_crystals.erase({x, y});
+          } else {
+            lit_crystals.emplace(Pos{x, y});
+            lit_wrong_crystals.erase({x, y});
+          }
+        } else {
+          if (IsSecondaryColorCrystal(x, y)) {
+            lit_compound_crystals.erase({x, y});
+            lit_wrong_crystals.emplace(Pos{x, y});
+          } else {
+            lit_crystals.erase({x, y});
+            lit_wrong_crystals.emplace(Pos{x, y});
+          }
+        }
+
+        int off_bits_count = __builtin_popcount(lit_color ^ crystal_color);
+        for (auto& p_set : crystals_nbit_off) {
+          p_set.erase(Pos{x, y});
+        }
+        if (off_bits_count != 0) {
+          crystals_nbit_off[off_bits_count - 1].emplace(Pos{x, y});
+        }
+        break;
+      }
+      AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
+    }
+    return valid;
+  }
+
+  void RevertLayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
+                      uint8_t lantern_color) {
+    RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
+    while (true) {
+      x += DIR_X[dir];
+      y += DIR_Y[dir];
+      if (x == lantern_x && y == lantern_y) {
+        break;
+      } else if (!IsInBound(x, y)) {
+        break;
+      } else if (IsObstacle(x, y)) {
+        break;
+      } else if (IsSlashMirror(x, y)) {
+        dir = MIRROR_S_TO[dir];
+      } else if (IsBackslashMirror(x, y)) {
+        dir = MIRROR_B_TO[dir];
+      } else if (IsCrystal(x, y)) {
+        uint8_t lit_color =
+            GetLitColor(x, y, lantern_x, lantern_y, lantern_color);
+        uint8_t crystal_color = GetCrystalColor(x, y);
+        if (lit_color == crystal_color) {
+          if (IsSecondaryColorCrystal(x, y)) {
+            lit_compound_crystals.emplace(Pos{x, y});
+            lit_wrong_crystals.erase({x, y});
+          } else {
+            lit_crystals.emplace(Pos{x, y});
+            lit_wrong_crystals.erase({x, y});
+          }
+        } else if (lit_color == 0) {
+          if (IsSecondaryColorCrystal(x, y)) {
+            lit_compound_crystals.erase({x, y});
+            lit_wrong_crystals.erase({x, y});
+          } else {
+            lit_crystals.erase({x, y});
+            lit_wrong_crystals.erase({x, y});
+          }
+        } else {
+          if (IsSecondaryColorCrystal(x, y)) {
+            lit_compound_crystals.erase({x, y});
+            lit_wrong_crystals.emplace(Pos{x, y});
+          } else {
+            lit_crystals.erase({x, y});
+            lit_wrong_crystals.emplace(Pos{x, y});
+          }
+        }
+
+        int off_bits_count = __builtin_popcount(lit_color ^ crystal_color);
+        for (auto& p_set : crystals_nbit_off) {
+          p_set.erase(Pos{x, y});
+        }
+        if (off_bits_count != 0) {
+          crystals_nbit_off[off_bits_count - 1].emplace(Pos{x, y});
+        }
+
+        break;
+      }
+
+      RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
+    }
+  }
+
   bool PutLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
     assert(IsEmpty(lantern_x, lantern_y));
 
     lanterns.emplace(
         LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, lantern_color);
-    for (int d = 0; d < 4; ++d) {
-      AddLanternInfo(lantern_x, lantern_y, d, lantern_x, lantern_y,
-                     lantern_color);
-    }
 
     bool valid = true;
     for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
-      int dir = initial_dir;
-      int x = lantern_x;
-      int y = lantern_y;
-      while (true) {
-        x += DIR_X[dir];
-        y += DIR_Y[dir];
-        if (!IsInBound(x, y)) {
-          break;
-        } else if (IsObstacle(x, y)) {
-          break;
-        } else if (IsLantern(x, y)) {
-          valid = false;
-          if (x == lantern_x && y == lantern_y) {
-            break;
-          }
-        } else if (IsSlashMirror(x, y)) {
-          dir = MIRROR_S_TO[dir];
-        } else if (IsBackslashMirror(x, y)) {
-          dir = MIRROR_B_TO[dir];
-        } else if (IsCrystal(x, y)) {
-          uint8_t lit_color = GetLitColor(x, y);
-          uint8_t crystal_color = GetCrystalColor(x, y);
-          if (lit_color == crystal_color) {
-            if (IsSecondaryColorCrystal(x, y)) {
-              lit_compound_crystals.emplace(Pos{x, y});
-              lit_wrong_crystals.erase({x, y});
-            } else {
-              lit_crystals.emplace(Pos{x, y});
-              lit_wrong_crystals.erase({x, y});
-            }
-          } else {
-            if (IsSecondaryColorCrystal(x, y)) {
-              lit_compound_crystals.erase({x, y});
-              lit_wrong_crystals.emplace(Pos{x, y});
-            } else {
-              lit_crystals.erase({x, y});
-              lit_wrong_crystals.emplace(Pos{x, y});
-            }
-          }
-
-          int off_bits_count = __builtin_popcount(lit_color ^ crystal_color);
-          for (auto& p_set : crystals_nbit_off) {
-            p_set.erase(Pos{x, y});
-          }
-          if (off_bits_count != 0) {
-            crystals_nbit_off[off_bits_count - 1].emplace(Pos{x, y});
-          }
-          break;
-        }
-
-        AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
-      }
+      valid &= LayTrace(lantern_x, lantern_y, initial_dir, lantern_x, lantern_y,
+                        lantern_color);
     }
-
     return valid;
   }
 
-  int RemoveLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
+  void RemoveLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
     assert(IsLantern(lantern_x, lantern_y));
     assert(GetCell(lantern_x, lantern_y) == lantern_color);
 
     lanterns.erase({lantern_x, lantern_y, lantern_color});
     SetCell(lantern_x, lantern_y, EMPTY_CELL);
-    for (int d = 0; d < 4; ++d) {
-      RemoveLanternInfo(lantern_x, lantern_y, d, lantern_x, lantern_y,
-                        lantern_color);
-    }
 
-    int score_diff = 0;
     for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
-      int dir = initial_dir;
-      int x = lantern_x;
-      int y = lantern_y;
-      while (true) {
-        x += DIR_X[dir];
-        y += DIR_Y[dir];
-        if (x == lantern_x && y == lantern_y) {
-          break;
-        } else if (!IsInBound(x, y)) {
-          break;
-        } else if (IsObstacle(x, y)) {
-          break;
-        } else if (IsSlashMirror(x, y)) {
-          dir = MIRROR_S_TO[dir];
-        } else if (IsBackslashMirror(x, y)) {
-          dir = MIRROR_B_TO[dir];
-        } else if (IsCrystal(x, y)) {
-          uint8_t lit_color =
-              GetLitColor(x, y, lantern_x, lantern_y, lantern_color);
-          uint8_t crystal_color = GetCrystalColor(x, y);
-          if (lit_color == crystal_color) {
-            if (IsSecondaryColorCrystal(x, y)) {
-              lit_compound_crystals.emplace(Pos{x, y});
-              lit_wrong_crystals.erase({x, y});
-            } else {
-              lit_crystals.emplace(Pos{x, y});
-              lit_wrong_crystals.erase({x, y});
-            }
-          } else if (lit_color == 0) {
-            if (IsSecondaryColorCrystal(x, y)) {
-              lit_compound_crystals.erase({x, y});
-              lit_wrong_crystals.erase({x, y});
-            } else {
-              lit_crystals.erase({x, y});
-              lit_wrong_crystals.erase({x, y});
-            }
-          } else {
-            if (IsSecondaryColorCrystal(x, y)) {
-              lit_compound_crystals.erase({x, y});
-              lit_wrong_crystals.emplace(Pos{x, y});
-            } else {
-              lit_crystals.erase({x, y});
-              lit_wrong_crystals.emplace(Pos{x, y});
-            }
-          }
-
-          int off_bits_count = __builtin_popcount(lit_color ^ crystal_color);
-          for (auto& p_set : crystals_nbit_off) {
-            p_set.erase(Pos{x, y});
-          }
-          if (off_bits_count != 0) {
-            crystals_nbit_off[off_bits_count - 1].emplace(Pos{x, y});
-          }
-
-          break;
-        }
-
-        RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
-      }
+      RevertLayTrace(lantern_x, lantern_y, initial_dir, lantern_x, lantern_y,
+                     lantern_color);
     }
-    return score_diff;
   }
 
   bool PutItem(int item_x, int item_y, uint8_t item) {
-    assert(IsEmpty(item_x, item_y));
-
-    set<LanternLookupMetadata> lanterns_to_process;
-    for (int d = 0; d < 4; ++d) {
-      const auto& l = GetLanternInfo(item_x, item_y, d);
-      lanterns_to_process.insert(l.begin(), l.end());
+    assert(item == EMPTY_CELL || IsEmpty(item_x, item_y));
+    array<set<LanternLookupMetadata>, 4> lanterns_to_process;
+    for (int i = 0; i < 4; ++i) {
+      int x = item_x - DIR_X[i];
+      int y = item_y - DIR_Y[i];
+      if (IsInBound(x, y)) {
+        lanterns_to_process[i] = GetLanternInfo(x, y, i);
+      }
     }
-
-    for (const auto& l : lanterns_to_process) {
-      RemoveLantern(l.x, l.y, l.color);
+    for (int i = 0; i < 4; ++i) {
+      int x = item_x - DIR_X[i];
+      int y = item_y - DIR_Y[i];
+      for (const auto& l : lanterns_to_process[i]) {
+        RevertLayTrace(x, y, i, l.x, l.y, l.color);
+      }
     }
-
     SetCell(item_x, item_y, item);
-
     bool valid = true;
-    for (const auto& l : lanterns_to_process) {
-      valid &= PutLantern(l.x, l.y, l.color);
+    for (int i = 0; i < 4; ++i) {
+      int x = item_x - DIR_X[i];
+      int y = item_y - DIR_Y[i];
+      for (const auto& l : lanterns_to_process[i]) {
+        valid &= LayTrace(x, y, i, l.x, l.y, l.color);
+      }
     }
     return valid;
   }
 
   bool RemoveItem(int item_x, int item_y) {
     assert(GetCell(item_x, item_y) & ITEM_MASK);
-
-    set<LanternLookupMetadata> lanterns_to_process;
-    for (int i = 0; i < 4; ++i) {
-      int x = item_x - DIR_X[i];
-      int y = item_y - DIR_Y[i];
-      if (IsInBound(x, y)) {
-        const auto& l = GetLanternInfo(x, y, i);
-        lanterns_to_process.insert(l.begin(), l.end());
-      }
-    }
-
-    for (const auto& l : lanterns_to_process) {
-      RemoveLantern(l.x, l.y, l.color);
-    }
-
-    SetCell(item_x, item_y, EMPTY_CELL);
-
-    bool valid = true;
-    for (const auto& l : lanterns_to_process) {
-      valid &= PutLantern(l.x, l.y, l.color);
-    }
-    return valid;
+    return PutItem(item_x, item_y, EMPTY_CELL);
   }
 
   void PutObstacle(int obstacle_x, int obstacle_y) {
