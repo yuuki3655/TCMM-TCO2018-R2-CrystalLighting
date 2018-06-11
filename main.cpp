@@ -504,18 +504,29 @@ class Solver {
     uniform_real_distribution<double> rand_prob(0, 1);
 
     double energy = GetEnergy();
-    auto should_accept = [&energy, &rand_prob, &gen, this]() {
+    double best_energy = energy;
+    auto accept = [&energy, &best_energy, &rand_prob, &gen, this]() {
+      if (!board_.invalid_lanterns.empty()) {
+        return false;
+      }
       double new_energy = GetEnergy();
-      return new_energy < energy ||
-             rand_prob(gen) < exp(-(new_energy - energy) / GetTemperature());
+      if (new_energy <= energy ||
+          rand_prob(gen) < exp(-(new_energy - energy) / GetTemperature())) {
+        best_energy = min(best_energy, new_energy);
+        energy = new_energy;
+        MaybeUpdateBestAnswer();
+        return true;
+      }
+      return false;
     };
     while (timer_->GetNormalizedTime() < 0.95) {
 #ifdef LOCAL_DEBUG_MODE
       static double next_report_time = 0;
       if (next_report_time < timer_->GetNormalizedTime()) {
         cerr << "time: " << next_report_time << ", temp: " << GetTemperature()
-             << ", energy: " << energy << ", score: " << GetScore()
-             << ", best: " << best_answer_.score << endl;
+             << ", energy: " << energy << ", best_energy: " << best_energy
+             << ", score: " << GetScore() << ", best: " << best_answer_.score
+             << endl;
         next_report_time += 0.1;
       }
 #endif
@@ -529,20 +540,14 @@ class Solver {
           if (item_type == OBSTACLE) {
             if (board_.obstacles.size() < max_obstacles_) {
               board_.PutObstacle(x, y);
-              if (should_accept()) {
-                energy = GetEnergy();
-                MaybeUpdateBestAnswer();
-              } else {
+              if (!accept()) {
                 board_.RemoveObstacle(x, y);
               }
             }
           } else {
             if (board_.mirrors.size() < max_mirrors_) {
               board_.PutMirror(x, y, item_type);
-              if (board_.invalid_lanterns.empty() && should_accept()) {
-                energy = GetEnergy();
-                MaybeUpdateBestAnswer();
-              } else {
+              if (!accept()) {
                 board_.RemoveMirror(x, y, item_type);
               }
             }
@@ -550,10 +555,7 @@ class Solver {
         } else {
           uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
           board_.PutLantern(x, y, color);
-          if (board_.invalid_lanterns.empty() && should_accept()) {
-            energy = GetEnergy();
-            MaybeUpdateBestAnswer();
-          } else {
+          if (!accept()) {
             board_.RemoveLantern(x, y, color);
           }
         }
@@ -561,28 +563,19 @@ class Solver {
         if (board_.IsLantern(x, y)) {
           uint8_t color = board_.GetCell(x, y);
           board_.RemoveLantern(x, y, color);
-          if (should_accept()) {
-            energy = GetEnergy();
-            MaybeUpdateBestAnswer();
-          } else {
+          if (!accept()) {
             board_.PutLantern(x, y, color);
           }
         } else if (board_.IsObstacle(x, y)) {
           board_.RemoveObstacle(x, y);
-          if (board_.invalid_lanterns.empty() && should_accept()) {
-            energy = GetEnergy();
-            MaybeUpdateBestAnswer();
-          } else {
+          if (!accept()) {
             board_.PutObstacle(x, y);
           }
         } else if (board_.IsSlashMirror(x, y) ||
                    board_.IsBackslashMirror(x, y)) {
           uint8_t type = board_.GetCell(x, y);
           board_.RemoveMirror(x, y, type);
-          if (board_.invalid_lanterns.empty() && should_accept()) {
-            energy = GetEnergy();
-            MaybeUpdateBestAnswer();
-          } else {
+          if (!accept()) {
             board_.PutMirror(x, y, type);
           }
         }
