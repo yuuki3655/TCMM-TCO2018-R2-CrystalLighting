@@ -473,6 +473,9 @@ class Solver {
   }
 
   int GetScore() const {
+    if (!board_.invalid_lanterns.empty()) {
+      return -1;
+    }
     return board_.lit_crystals.size() * 20 +
            board_.lit_compound_crystals.size() * 30 -
            board_.lit_wrong_crystals.size() * 10 -
@@ -482,9 +485,17 @@ class Solver {
   }
 
   double GetEnergy() const {
-    return -(GetScore() * 0.1 - 1.0 * board_.crystals_nbit_off[0].size() -
-             2.0 * board_.crystals_nbit_off[1].size() -
-             3.0 * board_.crystals_nbit_off[2].size());
+    return -(2.0 * board_.lit_crystals.size() +
+             3.0 * board_.lit_compound_crystals.size() +
+             -1.0 * board_.lit_wrong_crystals.size() +
+             -0.1 * board_.lanterns.size() * cost_lantern_ +
+             -0.1 * board_.obstacles.size() * cost_obstacle_ +
+             -0.1 * board_.mirrors.size() * cost_mirror_ +
+             -1.0 * board_.crystals_nbit_off[0].size() +
+             -2.0 * board_.crystals_nbit_off[1].size() +
+             -3.0 * board_.crystals_nbit_off[2].size() +
+             -4.0 * board_.invalid_lanterns.size() *
+                 board_.invalid_lanterns.size());
   }
 
   double GetTemperature() const { return 1.0 - timer_->GetNormalizedTime(); }
@@ -506,9 +517,6 @@ class Solver {
     double energy = GetEnergy();
     double best_energy = energy;
     auto accept = [&energy, &best_energy, &rand_prob, &gen, this]() {
-      if (!board_.invalid_lanterns.empty()) {
-        return false;
-      }
       double new_energy = GetEnergy();
       if (new_energy <= energy ||
           rand_prob(gen) < exp(-(new_energy - energy) / GetTemperature())) {
@@ -524,6 +532,7 @@ class Solver {
       static double next_report_time = 0;
       if (next_report_time < timer_->GetNormalizedTime()) {
         cerr << "time: " << next_report_time << ", temp: " << GetTemperature()
+             << ", invalid: " << board_.invalid_lanterns.size()
              << ", energy: " << energy << ", best_energy: " << best_energy
              << ", score: " << GetScore() << ", best: " << best_answer_.score
              << endl;
@@ -535,7 +544,16 @@ class Solver {
       int x = next_pos.first;
       int y = next_pos.second;
       if (board_.IsEmpty(x, y)) {
-        if (board_.HasAnyLanternInfo(x, y)) {
+        bool create_lantern =
+            !board_.HasAnyLanternInfo(x, y) ||
+            uniform_real_distribution<double>(0, 1.0)(gen) < 0.01;
+        if (create_lantern) {
+          uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
+          board_.PutLantern(x, y, color);
+          if (!accept()) {
+            board_.RemoveLantern(x, y, color);
+          }
+        } else {
           uint8_t item_type = uniform_int_distribution<int>(1, 3)(gen) << 6;
           if (item_type == OBSTACLE) {
             if (board_.obstacles.size() < max_obstacles_) {
@@ -551,12 +569,6 @@ class Solver {
                 board_.RemoveMirror(x, y, item_type);
               }
             }
-          }
-        } else {
-          uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
-          board_.PutLantern(x, y, color);
-          if (!accept()) {
-            board_.RemoveLantern(x, y, color);
           }
         }
       } else {
