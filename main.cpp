@@ -497,12 +497,12 @@ class Solver {
              -0.1 * board_.obstacles.size() * cost_obstacle_ +
              -0.1 * board_.mirrors.size() * cost_mirror_ +
              -0.1 * board_.crystals_nbit_off[0].size() +
-             -0.2 * board_.crystals_nbit_off[1].size() +
-             -0.3 * board_.crystals_nbit_off[2].size() +
-             -2.0 * board_.invalid_lanterns.size() *
+             -0.3 * board_.crystals_nbit_off[1].size() +
+             -0.6 * board_.crystals_nbit_off[2].size() +
+             -4.0 * board_.invalid_lanterns.size() *
                  board_.invalid_lanterns.size() +
-             -2.0 * exceeded_mirrors * exceeded_mirrors +
-             -2.0 * exceeded_obstacles * exceeded_obstacles);
+             -4.0 * exceeded_mirrors * exceeded_mirrors +
+             -4.0 * exceeded_obstacles * exceeded_obstacles);
   }
 
   double GetTemperature() const { return 1.0 - timer_->GetNormalizedTime(); }
@@ -524,12 +524,12 @@ class Solver {
     double energy = GetEnergy();
     double best_energy = energy;
     auto accept = [&energy, &best_energy, &rand_prob, &gen, this]() {
+      MaybeUpdateBestAnswer();
       double new_energy = GetEnergy();
       if (new_energy <= energy ||
           rand_prob(gen) < exp(-(new_energy - energy) / GetTemperature())) {
         best_energy = min(best_energy, new_energy);
         energy = new_energy;
-        MaybeUpdateBestAnswer();
         return true;
       }
       return false;
@@ -556,7 +556,7 @@ class Solver {
         bool create_lantern =
             !board_.HasAnyLanternInfo(x, y) ||
             (max_mirrors_ == 0 && max_obstacles_ == 0) ||
-            uniform_real_distribution<double>(0, 1.0)(gen) < 0.01;
+            uniform_real_distribution<double>(0, 1.0)(gen) < 0.001;
         if (create_lantern) {
           uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
           board_.PutLantern(x, y, color);
@@ -573,14 +573,18 @@ class Solver {
             item_type = OBSTACLE;
           }
           if (item_type == OBSTACLE) {
-            board_.PutObstacle(x, y);
-            if (!accept()) {
-              board_.RemoveObstacle(x, y);
+            if (board_.obstacles.size() < max_obstacles_) {
+              board_.PutObstacle(x, y);
+              if (!accept()) {
+                board_.RemoveObstacle(x, y);
+              }
             }
           } else {
-            board_.PutMirror(x, y, item_type);
-            if (!accept()) {
-              board_.RemoveMirror(x, y, item_type);
+            if (board_.mirrors.size() < max_mirrors_) {
+              board_.PutMirror(x, y, item_type);
+              if (!accept()) {
+                board_.RemoveMirror(x, y, item_type);
+              }
             }
           }
         }
