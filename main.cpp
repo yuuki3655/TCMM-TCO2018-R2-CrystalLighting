@@ -32,9 +32,8 @@ constexpr uint8_t SLASH_MIRROR = (0x1 << 6);
 constexpr uint8_t BACKSLASH_MIRROR = (0x2 << 6);
 constexpr uint8_t OBSTACLE = (0x3 << 6);
 
-constexpr uint8_t LANTERN_MASK = 0x7;
-constexpr uint8_t CRYSTAL_MASK = (0x7 << 3);
-constexpr uint8_t ITEM_MASK = (0x3 << 6);
+constexpr uint8_t LANTERN_COLOR_MASK = 0x7;
+constexpr uint8_t CRYSTAL_COLOR_MASK = (0x7 << 3);
 
 // Timer implementation based on nika's submission.
 // http://community.topcoder.com/longcontest/?module=ViewProblemSolution&pm=14907&rd=17153&cr=20315020&subnum=17
@@ -58,6 +57,8 @@ class Timer {
   static constexpr double TIME_LIMIT_SECONDS = 10;
 };
 
+typedef pair<int, int> Pos;
+
 struct LanternLookupMetadata {
   int x;
   int y;
@@ -71,6 +72,8 @@ struct LanternLookupMetadata {
     return make_tuple(x, y, color) == make_tuple(rhs.x, rhs.y, rhs.color);
   }
 };
+
+typedef pair<Pos, Pos> InvalidLantern;
 
 struct MirrorMetadata {
   int x;
@@ -101,8 +104,6 @@ constexpr int DIR_Y[] = {-1, 0, 1, 0};
 constexpr int MIRROR_S_TO[] = {1, 0, 3, 2};
 constexpr int MIRROR_B_TO[] = {3, 2, 1, 0};
 
-typedef pair<int, int> Pos;
-
 struct Board {
   int w, h;
   vector<uint8_t> cells;
@@ -110,6 +111,7 @@ struct Board {
   set<MirrorMetadata> mirrors;
   set<LanternLookupMetadata> lanterns;
   array<vector<set<LanternLookupMetadata>>, 4> lantern_lookup;
+  set<InvalidLantern> invalid_lanterns;
   set<Pos> lit_crystals;
   set<Pos> lit_compound_crystals;
   set<Pos> lit_wrong_crystals;
@@ -181,7 +183,7 @@ struct Board {
   }
 
   inline bool IsCrystal(int x, int y) const {
-    return GetCell(x, y) & CRYSTAL_MASK;
+    return GetCell(x, y) & CRYSTAL_COLOR_MASK;
   }
 
   inline bool IsSecondaryColorCrystal(int x, int y) const {
@@ -190,11 +192,11 @@ struct Board {
   }
 
   inline uint8_t GetCrystalColor(int x, int y) const {
-    return (GetCell(x, y) & CRYSTAL_MASK) >> 3;
+    return (GetCell(x, y) & CRYSTAL_COLOR_MASK) >> 3;
   }
 
   inline bool IsLantern(int x, int y) const {
-    return GetCell(x, y) & LANTERN_MASK;
+    return GetCell(x, y) & LANTERN_COLOR_MASK;
   }
 
   inline bool IsObstacle(int x, int y) const {
@@ -209,10 +211,14 @@ struct Board {
     return GetCell(x, y) == BACKSLASH_MIRROR;
   }
 
-  bool LayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
+  void LayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
                 uint8_t lantern_color) {
-    bool valid = true;
+    assert(IsLantern(lantern_x, lantern_y));
     AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
+
+#ifdef LOCAL_DEBUG_MODE
+    int loop_counter = 0;
+#endif
     while (true) {
       x += DIR_X[dir];
       y += DIR_Y[dir];
@@ -221,10 +227,10 @@ struct Board {
       } else if (IsObstacle(x, y)) {
         break;
       } else if (IsLantern(x, y)) {
-        valid = false;
-        if (x == lantern_x && y == lantern_y) {
-          break;
-        }
+        auto l1 = make_pair(x, y);
+        auto l2 = make_pair(lantern_x, lantern_y);
+        invalid_lanterns.emplace(InvalidLantern{min(l1, l2), max(l1, l2)});
+        break;
       } else if (IsSlashMirror(x, y)) {
         dir = MIRROR_S_TO[dir];
       } else if (IsBackslashMirror(x, y)) {
@@ -259,22 +265,35 @@ struct Board {
         }
         break;
       }
+
+#ifdef LOCAL_DEBUG_MODE
+      assert(loop_counter++ < w * h * 2);
+#endif
+
+      assert(!(x == lantern_x && y == lantern_y));
       AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
     }
-    return valid;
   }
 
   void RevertLayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
                       uint8_t lantern_color) {
+    assert(IsLantern(lantern_x, lantern_y));
     RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
+
+#ifdef LOCAL_DEBUG_MODE
+    int loop_counter = 0;
+#endif
     while (true) {
       x += DIR_X[dir];
       y += DIR_Y[dir];
-      if (x == lantern_x && y == lantern_y) {
-        break;
-      } else if (!IsInBound(x, y)) {
+      if (!IsInBound(x, y)) {
         break;
       } else if (IsObstacle(x, y)) {
+        break;
+      } else if (IsLantern(x, y)) {
+        auto l1 = make_pair(x, y);
+        auto l2 = make_pair(lantern_x, lantern_y);
+        invalid_lanterns.erase({min(l1, l2), max(l1, l2)});
         break;
       } else if (IsSlashMirror(x, y)) {
         dir = MIRROR_S_TO[dir];
@@ -321,39 +340,16 @@ struct Board {
         break;
       }
 
+#ifdef LOCAL_DEBUG_MODE
+      assert(loop_counter++ < w * h * 2);
+#endif
+
+      assert(!(x == lantern_x && y == lantern_y));
       RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
     }
   }
 
-  bool PutLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
-    assert(IsEmpty(lantern_x, lantern_y));
-
-    lanterns.emplace(
-        LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
-    SetCell(lantern_x, lantern_y, lantern_color);
-
-    bool valid = true;
-    for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
-      valid &= LayTrace(lantern_x, lantern_y, initial_dir, lantern_x, lantern_y,
-                        lantern_color);
-    }
-    return valid;
-  }
-
-  void RemoveLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
-    assert(IsLantern(lantern_x, lantern_y));
-    assert(GetCell(lantern_x, lantern_y) == lantern_color);
-
-    lanterns.erase({lantern_x, lantern_y, lantern_color});
-    SetCell(lantern_x, lantern_y, EMPTY_CELL);
-
-    for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
-      RevertLayTrace(lantern_x, lantern_y, initial_dir, lantern_x, lantern_y,
-                     lantern_color);
-    }
-  }
-
-  bool PutItem(int item_x, int item_y, uint8_t item) {
+  void PutItem(int item_x, int item_y, uint8_t item) {
     assert(item == EMPTY_CELL || IsEmpty(item_x, item_y));
     array<set<LanternLookupMetadata>, 4> lanterns_to_process;
     for (int i = 0; i < 4; ++i) {
@@ -367,24 +363,49 @@ struct Board {
       int x = item_x - DIR_X[i];
       int y = item_y - DIR_Y[i];
       for (const auto& l : lanterns_to_process[i]) {
+        assert(GetCell(l.x, l.y) == l.color);
         RevertLayTrace(x, y, i, l.x, l.y, l.color);
       }
     }
     SetCell(item_x, item_y, item);
-    bool valid = true;
+    set<LanternLookupMetadata> processed_lanterns;
     for (int i = 0; i < 4; ++i) {
-      int x = item_x - DIR_X[i];
-      int y = item_y - DIR_Y[i];
       for (const auto& l : lanterns_to_process[i]) {
-        valid &= LayTrace(x, y, i, l.x, l.y, l.color);
+        if (processed_lanterns.insert(l).second) {
+          for (int j = 0; j < 4; ++j) {
+            LayTrace(l.x, l.y, j, l.x, l.y, l.color);
+          }
+        }
       }
     }
-    return valid;
   }
 
-  bool RemoveItem(int item_x, int item_y) {
-    assert(GetCell(item_x, item_y) & ITEM_MASK);
-    return PutItem(item_x, item_y, EMPTY_CELL);
+  void RemoveItem(int item_x, int item_y) {
+    assert(!IsEmpty(item_x, item_y));
+
+    PutItem(item_x, item_y, EMPTY_CELL);
+  }
+
+  void PutLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
+    assert(IsEmpty(lantern_x, lantern_y));
+    PutItem(lantern_x, lantern_y, lantern_color);
+    lanterns.emplace(
+        LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
+    for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
+      LayTrace(lantern_x, lantern_y, initial_dir, lantern_x, lantern_y,
+               lantern_color);
+    }
+  }
+
+  void RemoveLantern(int lantern_x, int lantern_y, uint8_t lantern_color) {
+    assert(IsLantern(lantern_x, lantern_y));
+    assert(GetCell(lantern_x, lantern_y) == lantern_color);
+    for (int initial_dir = 0; initial_dir < 4; ++initial_dir) {
+      RevertLayTrace(lantern_x, lantern_y, initial_dir, lantern_x, lantern_y,
+                     lantern_color);
+    }
+    lanterns.erase({lantern_x, lantern_y, lantern_color});
+    RemoveItem(lantern_x, lantern_y);
   }
 
   void PutObstacle(int obstacle_x, int obstacle_y) {
@@ -393,31 +414,28 @@ struct Board {
     obstacles.emplace(Pos{obstacle_x, obstacle_y});
   }
 
-  bool RemoveObstacle(int obstacle_x, int obstacle_y) {
+  void RemoveObstacle(int obstacle_x, int obstacle_y) {
     assert(IsObstacle(obstacle_x, obstacle_y));
     assert(obstacles.find({obstacle_x, obstacle_y}) != obstacles.end());
-    bool valid = RemoveItem(obstacle_x, obstacle_y);
     obstacles.erase({obstacle_x, obstacle_y});
-    return valid;
+    RemoveItem(obstacle_x, obstacle_y);
   }
 
-  bool PutMirror(int mirror_x, int mirror_y, uint8_t type) {
+  void PutMirror(int mirror_x, int mirror_y, uint8_t type) {
     assert(IsEmpty(mirror_x, mirror_y));
     assert(type == SLASH_MIRROR || type == BACKSLASH_MIRROR);
-    bool valid = PutItem(mirror_x, mirror_y, type);
+    PutItem(mirror_x, mirror_y, type);
     mirrors.emplace(MirrorMetadata{mirror_x, mirror_y, type});
-    return valid;
   }
 
-  bool RemoveMirror(int mirror_x, int mirror_y, uint8_t type) {
+  void RemoveMirror(int mirror_x, int mirror_y, uint8_t type) {
     assert(IsSlashMirror(mirror_x, mirror_y) ||
            IsBackslashMirror(mirror_x, mirror_y));
     assert(GetCell(mirror_x, mirror_y) == type);
     assert(mirrors.find(MirrorMetadata{mirror_x, mirror_y, type}) !=
            mirrors.end());
-    bool valid = RemoveItem(mirror_x, mirror_y);
     mirrors.erase({mirror_x, mirror_y, type});
-    return valid;
+    RemoveItem(mirror_x, mirror_y);
   }
 };
 
@@ -520,8 +538,8 @@ class Solver {
             }
           } else {
             if (board_.mirrors.size() < max_mirrors_) {
-              bool valid = board_.PutMirror(x, y, item_type);
-              if (valid && should_accept()) {
+              board_.PutMirror(x, y, item_type);
+              if (board_.invalid_lanterns.empty() && should_accept()) {
                 energy = GetEnergy();
                 MaybeUpdateBestAnswer();
               } else {
@@ -531,8 +549,8 @@ class Solver {
           }
         } else {
           uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
-          bool valid = board_.PutLantern(x, y, color);
-          if (valid && should_accept()) {
+          board_.PutLantern(x, y, color);
+          if (board_.invalid_lanterns.empty() && should_accept()) {
             energy = GetEnergy();
             MaybeUpdateBestAnswer();
           } else {
@@ -550,8 +568,8 @@ class Solver {
             board_.PutLantern(x, y, color);
           }
         } else if (board_.IsObstacle(x, y)) {
-          bool valid = board_.RemoveObstacle(x, y);
-          if (valid && should_accept()) {
+          board_.RemoveObstacle(x, y);
+          if (board_.invalid_lanterns.empty() && should_accept()) {
             energy = GetEnergy();
             MaybeUpdateBestAnswer();
           } else {
@@ -560,8 +578,8 @@ class Solver {
         } else if (board_.IsSlashMirror(x, y) ||
                    board_.IsBackslashMirror(x, y)) {
           uint8_t type = board_.GetCell(x, y);
-          bool valid = board_.RemoveMirror(x, y, type);
-          if (valid && should_accept()) {
+          board_.RemoveMirror(x, y, type);
+          if (board_.invalid_lanterns.empty() && should_accept()) {
             energy = GetEnergy();
             MaybeUpdateBestAnswer();
           } else {
