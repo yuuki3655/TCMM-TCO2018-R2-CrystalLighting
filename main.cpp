@@ -616,10 +616,8 @@ class Solver {
       int x = next_pos.first;
       int y = next_pos.second;
       if (board_.IsEmpty(x, y)) {
-        bool create_lantern =
-            !board_.HasAnyLanternInfo(x, y) ||
-            (max_mirrors_ == 0 && max_obstacles_ == 0) ||
-            uniform_real_distribution<double>(0, 1.0)(gen) < 0.001;
+        bool create_lantern = !board_.HasAnyLanternInfo(x, y) ||
+                              (max_mirrors_ == 0 && max_obstacles_ == 0);
         if (create_lantern) {
           uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
           board_.PutLantern(x, y, color);
