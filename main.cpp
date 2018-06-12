@@ -91,14 +91,6 @@ inline uint8_t CompoundColor(const set<LanternLookupMetadata>& lanterns) {
       [](uint8_t c, const LanternLookupMetadata& l) { return c | l.color; });
 }
 
-inline uint8_t CompoundColor(const set<LanternLookupMetadata>& lanterns,
-                             const LanternLookupMetadata& exclude) {
-  return accumulate(lanterns.begin(), lanterns.end(), 0,
-                    [&](uint8_t c, const LanternLookupMetadata& l) {
-                      return l == exclude ? c : (c | l.color);
-                    });
-}
-
 constexpr int DIR_X[] = {0, 1, 0, -1};
 constexpr int DIR_Y[] = {-1, 0, 1, 0};
 constexpr int MIRROR_S_TO[] = {1, 0, 3, 2};
@@ -124,15 +116,17 @@ struct Board {
 
   inline uint8_t GetCell(int x, int y) const { return cells[y * w + x]; }
 
-  inline void AddLanternInfo(int x, int y, int dir, int lantern_x,
+  inline bool AddLanternInfo(int x, int y, int dir, int lantern_x,
                              int lantern_y, uint8_t lantern_color) {
-    lantern_lookup[dir][y * w + x].emplace(
-        LanternLookupMetadata{lantern_x, lantern_y, lantern_color});
+    return lantern_lookup[dir][y * w + x]
+        .emplace(LanternLookupMetadata{lantern_x, lantern_y, lantern_color})
+        .second;
   }
 
-  inline void RemoveLanternInfo(int x, int y, int dir, int lantern_x,
+  inline bool RemoveLanternInfo(int x, int y, int dir, int lantern_x,
                                 int lantern_y, uint8_t lantern_color) {
-    lantern_lookup[dir][y * w + x].erase({lantern_x, lantern_y, lantern_color});
+    return lantern_lookup[dir][y * w + x].erase(
+               {lantern_x, lantern_y, lantern_color}) > 0;
   }
 
   inline const set<LanternLookupMetadata>& GetLanternInfo(int x, int y,
@@ -156,20 +150,6 @@ struct Board {
       int y2 = y - DIR_Y[dir];
       color |=
           IsInBound(x2, y2) ? CompoundColor(GetLanternInfo(x2, y2, dir)) : 0;
-    }
-    return color;
-  }
-
-  inline uint8_t GetLitColor(int x, int y, int exclude_x, int exclude_y,
-                             uint8_t exclude_color) const {
-    uint8_t color = 0;
-    for (int dir = 0; dir < 4; ++dir) {
-      int x2 = x - DIR_X[dir];
-      int y2 = y - DIR_Y[dir];
-      color |= IsInBound(x2, y2)
-                   ? CompoundColor(GetLanternInfo(x2, y2, dir),
-                                   {exclude_x, exclude_y, exclude_color})
-                   : 0;
     }
     return color;
   }
@@ -213,13 +193,9 @@ struct Board {
 
   void LayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
                 uint8_t lantern_color) {
+    assert(IsInBound(x, y));
     assert(IsLantern(lantern_x, lantern_y));
-    AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
-
-#ifdef LOCAL_DEBUG_MODE
-    int loop_counter = 0;
-#endif
-    while (true) {
+    while (AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color)) {
       x += DIR_X[dir];
       y += DIR_Y[dir];
       if (!IsInBound(x, y)) {
@@ -265,28 +241,27 @@ struct Board {
         }
         break;
       }
-
-#ifdef LOCAL_DEBUG_MODE
-      assert(loop_counter++ < w * h * 2);
-#endif
-
-      assert(!(x == lantern_x && y == lantern_y));
-      AddLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
     }
   }
 
-  void RevertLayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
-                      uint8_t lantern_color) {
+  int RevertLayTrace(int x, int y, int dir, int lantern_x, int lantern_y,
+                     uint8_t lantern_color) {
+    assert(IsInBound(x, y));
     assert(IsLantern(lantern_x, lantern_y));
-    RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
-
-#ifdef LOCAL_DEBUG_MODE
-    int loop_counter = 0;
-#endif
+    const int initial_entering_cell_x = x + DIR_X[dir];
+    const int initial_entering_cell_y = y + DIR_Y[dir];
+    int last_entrant_dir = dir;
     while (true) {
+      bool no_lay =
+          !RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
       x += DIR_X[dir];
       y += DIR_Y[dir];
-      if (!IsInBound(x, y)) {
+      if (x == initial_entering_cell_x && y == initial_entering_cell_y) {
+        last_entrant_dir = dir;
+      }
+      if (no_lay) {
+        break;
+      } else if (!IsInBound(x, y)) {
         break;
       } else if (IsObstacle(x, y)) {
         break;
@@ -300,8 +275,7 @@ struct Board {
       } else if (IsBackslashMirror(x, y)) {
         dir = MIRROR_B_TO[dir];
       } else if (IsCrystal(x, y)) {
-        uint8_t lit_color =
-            GetLitColor(x, y, lantern_x, lantern_y, lantern_color);
+        uint8_t lit_color = GetLitColor(x, y);
         uint8_t crystal_color = GetCrystalColor(x, y);
         if (lit_color == crystal_color) {
           if (IsSecondaryColorCrystal(x, y)) {
@@ -336,17 +310,10 @@ struct Board {
         if (off_bits_count != 0) {
           crystals_nbit_off[off_bits_count - 1].emplace(Pos{x, y});
         }
-
         break;
       }
-
-#ifdef LOCAL_DEBUG_MODE
-      assert(loop_counter++ < w * h * 2);
-#endif
-
-      assert(!(x == lantern_x && y == lantern_y));
-      RemoveLanternInfo(x, y, dir, lantern_x, lantern_y, lantern_color);
     }
+    return last_entrant_dir;
   }
 
   void PutItem(int item_x, int item_y, uint8_t item) {
@@ -359,22 +326,25 @@ struct Board {
         lanterns_to_process[i] = GetLanternInfo(x, y, i);
       }
     }
+    set<pair<LanternLookupMetadata, int>> blacklist;
     for (int i = 0; i < 4; ++i) {
       int x = item_x - DIR_X[i];
       int y = item_y - DIR_Y[i];
       for (const auto& l : lanterns_to_process[i]) {
         assert(GetCell(l.x, l.y) == l.color);
-        RevertLayTrace(x, y, i, l.x, l.y, l.color);
+        int last_entrant_dir = RevertLayTrace(x, y, i, l.x, l.y, l.color);
+        if (last_entrant_dir != i) {
+          blacklist.emplace(make_pair(l, last_entrant_dir));
+        }
       }
     }
     SetCell(item_x, item_y, item);
-    set<LanternLookupMetadata> processed_lanterns;
     for (int i = 0; i < 4; ++i) {
+      int x = item_x - DIR_X[i];
+      int y = item_y - DIR_Y[i];
       for (const auto& l : lanterns_to_process[i]) {
-        if (processed_lanterns.insert(l).second) {
-          for (int j = 0; j < 4; ++j) {
-            LayTrace(l.x, l.y, j, l.x, l.y, l.color);
-          }
+        if (blacklist.find(make_pair(l, i)) == blacklist.end()) {
+          LayTrace(x, y, i, l.x, l.y, l.color);
         }
       }
     }
@@ -437,6 +407,96 @@ struct Board {
     mirrors.erase({mirror_x, mirror_y, type});
     RemoveItem(mirror_x, mirror_y);
   }
+
+#ifdef ENABLE_INTERNAL_STATE_CHECK
+  void CheckInternalStateForDebug() const {
+    vector<vector<int>> lit_color(w, vector<int>(h, 0));
+    set<pair<Pos, Pos>> tmp_invalid_lanterns;
+    auto update_lay = [&](int x, int y, int dir, int color) {
+      set<pair<Pos, int>> visited;
+      auto init_pos = make_pair(x, y);
+      while (visited.insert(make_pair(Pos{x, y}, dir)).second) {
+        x += DIR_X[dir];
+        y += DIR_Y[dir];
+        if (!IsInBound(x, y)) {
+          return;
+        } else if (IsObstacle(x, y)) {
+          return;
+        } else if (IsLantern(x, y)) {
+          auto l2 = make_pair(x, y);
+          tmp_invalid_lanterns.emplace(
+              make_pair(min(init_pos, l2), max(init_pos, l2)));
+          return;
+        } else if (IsSlashMirror(x, y)) {
+          dir = MIRROR_S_TO[dir];
+        } else if (IsBackslashMirror(x, y)) {
+          dir = MIRROR_B_TO[dir];
+        } else if (IsCrystal(x, y)) {
+          lit_color[x][y] |= color;
+          return;
+        }
+      }
+    };
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (GetCell(x, y) & LANTERN_COLOR_MASK) {
+          for (int d = 0; d < 4; ++d) {
+            update_lay(x, y, d, GetCell(x, y));
+          }
+        }
+      }
+    }
+    int num_lit_crystals = 0;
+    int num_lit_compound_crystals = 0;
+    int num_lit_wrong_crystals = 0;
+    int num_crystals_nbit_off[] = {0, 0, 0, 0};
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (GetCell(x, y) & CRYSTAL_COLOR_MASK) {
+          int result = lit_color[x][y] ^ (GetCell(x, y) >> 3);
+          if (result == 0) {
+            if (IsSecondaryColorCrystal(x, y)) {
+              ++num_lit_compound_crystals;
+            } else {
+              ++num_lit_crystals;
+            }
+          } else if (lit_color[x][y] != 0) {
+            ++num_lit_wrong_crystals;
+          }
+          num_crystals_nbit_off[__builtin_popcount(result)]++;
+        }
+      }
+    }
+    if (lit_crystals.size() != num_lit_crystals) {
+      cerr << lit_crystals.size() << " != " << num_lit_crystals;
+    }
+    assert(lit_crystals.size() == num_lit_crystals);
+    if (lit_compound_crystals.size() != num_lit_compound_crystals) {
+      cerr << lit_compound_crystals.size()
+           << " != " << num_lit_compound_crystals;
+    }
+    assert(lit_compound_crystals.size() == num_lit_compound_crystals);
+    if (lit_wrong_crystals.size() != num_lit_wrong_crystals) {
+      cerr << lit_wrong_crystals.size() << " != " << num_lit_wrong_crystals
+           << endl;
+    }
+    assert(lit_wrong_crystals.size() == num_lit_wrong_crystals);
+
+    for (int i = 0; i < 3; ++i) {
+      if (crystals_nbit_off[i].size() != num_crystals_nbit_off[i + 1]) {
+        cerr << "bit_n = " << (i + 1) << ", " << crystals_nbit_off[i].size()
+             << " != " << num_crystals_nbit_off[i + 1] << endl;
+      }
+      assert(crystals_nbit_off[i].size() == num_crystals_nbit_off[i + 1]);
+    }
+
+    if (invalid_lanterns.size() != tmp_invalid_lanterns.size()) {
+      cerr << invalid_lanterns.size() << " != " << tmp_invalid_lanterns.size()
+           << endl;
+    }
+    assert(invalid_lanterns.size() == tmp_invalid_lanterns.size());
+  }
+#endif
 };
 
 struct Answer {
@@ -524,6 +584,9 @@ class Solver {
     double energy = GetEnergy();
     double best_energy = energy;
     auto accept = [&energy, &best_energy, &rand_prob, &gen, this]() {
+#ifdef ENABLE_INTERNAL_STATE_CHECK
+      board_.CheckInternalStateForDebug();
+#endif
       MaybeUpdateBestAnswer();
       double new_energy = GetEnergy();
       if (new_energy <= energy ||
