@@ -11,4 +11,4 @@ mkdir scores
 ./tools/update_score_worker.sh 601 800 &
 wait
 
-awk '{s+=$3} END {printf "Total = %.1f\n", s}' scores/score_*.txt | tee score.txt
+./score_diff.sh | tee score.txt
