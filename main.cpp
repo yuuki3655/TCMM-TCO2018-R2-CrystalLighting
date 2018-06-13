@@ -91,6 +91,7 @@ struct Board {
   set<Pos> obstacles;
   set<Mirror> mirrors;
   set<Lantern> lanterns;
+  int wrong_lays;
   int invalid_lays;
   int lit_crystals;
   int lit_compound_crystals;
@@ -210,6 +211,10 @@ struct Board {
         --crystals_nbit_off[__builtin_popcount(prev_lit_color ^ crystal_color)];
         ++crystals_nbit_off[__builtin_popcount(lit_color ^ crystal_color)];
 
+        if (!(lantern_color & crystal_color)) {
+          ++wrong_lays;
+        }
+
         break;
       }
 
@@ -253,6 +258,10 @@ struct Board {
 
         --crystals_nbit_off[__builtin_popcount(prev_lit_color ^ crystal_color)];
         ++crystals_nbit_off[__builtin_popcount(lit_color ^ crystal_color)];
+
+        if (!(lantern_color & crystal_color)) {
+          --wrong_lays;
+        }
 
         break;
       }
@@ -362,6 +371,7 @@ struct Board {
 
     vector<vector<uint8_t>> local_lit_colors(w, vector<uint8_t>(h, 0));
     int local_invalid_lays = 0;
+    int local_wrong_lays = 0;
     auto update_lay = [&](int x, int y, int dir, uint8_t color) {
       while (true) {
         x += DIR_X[dir];
@@ -379,6 +389,9 @@ struct Board {
           dir = MIRROR_B_TO[dir];
         } else if (IsCrystal(x, y)) {
           local_lit_colors[x][y] |= color;
+          if (!(color & GetCrystalColor(x, y))) {
+            ++local_wrong_lays;
+          }
           return;
         }
       }
@@ -455,6 +468,12 @@ struct Board {
       assert(crystals_nbit_off[i] == local_crystals_nbit_off[i]);
     }
 
+    if (wrong_lays != local_wrong_lays) {
+      cerr << message << endl;
+      cerr << wrong_lays << " != " << local_wrong_lays << endl;
+    }
+    assert(wrong_lays == local_wrong_lays);
+
     if (invalid_lays != local_invalid_lays) {
       cerr << message << endl;
       cerr << invalid_lays << " != " << local_invalid_lays << endl;
@@ -517,8 +536,8 @@ class Solver {
              -0.1 * board_.mirrors.size() * cost_mirror_ +
              -0.1 * board_.crystals_nbit_off[1] +
              -0.3 * board_.crystals_nbit_off[2] +
-             -0.6 * board_.crystals_nbit_off[3] +
-             -4.0 * board_.invalid_lays * board_.invalid_lays +
+             -0.6 * board_.crystals_nbit_off[3] + -0.1 * board_.wrong_lays +
+             -4.0 * board_.invalid_lays +
              -4.0 * exceeded_mirrors * exceeded_mirrors +
              -4.0 * exceeded_obstacles * exceeded_obstacles);
   }
