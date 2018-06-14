@@ -557,16 +557,15 @@ class Optimizer {
     };
     while (!timer_->IsTimeout()) {
 #ifdef LOCAL_DEBUG_MODE
-      static double next_report_time = 0;
-      if (next_report_time < timer_->GetNormalizedTime()) {
-        cerr << "time: " << next_report_time << ", temp: " << GetTemperature()
+      if (next_report_time_ < timer_->GetNormalizedTime()) {
+        cerr << "time: " << next_report_time_ << ", temp: " << GetTemperature()
              << ", invalid_lays: " << board_.invalid_lays
              << ", obstacles: " << board_.obstacles << "/" << max_obstacles_
              << ", mirrors: " << board_.mirrors << "/" << max_mirrors_
              << ", energy: " << energy << ", best_energy: " << best_energy
              << ", score: " << GetScore() << ", best_score: " << result_.score
              << endl;
-        next_report_time += 0.1;
+        next_report_time_ += 0.1;
       }
 #endif
 
@@ -664,6 +663,10 @@ class Optimizer {
 
   Board board_;
   OptimizerResult result_ = {};
+
+#ifdef LOCAL_DEBUG_MODE
+  double next_report_time_ = 0;
+#endif
 };
 
 class CrystalLighting {
