@@ -637,7 +637,7 @@ class Optimizer {
     }
   }
 
-  vector<string> Optimize() {
+  OptimizerResult Optimize() {
 #ifdef ENABLE_INTERNAL_STATE_CHECK
     board_.CheckInternalStateForDebug("initial board state", initial_board_);
 #endif
@@ -648,32 +648,7 @@ class Optimizer {
     cerr << "Final score = " << result_.score << endl;
 #endif
 
-    vector<string> ret;
-    for (int y = 0; y < board_height_; ++y) {
-      for (int x = 0; x < board_width_; ++x) {
-        uint8_t cell = result_.cells[x + y * board_width_];
-        if (cell & LANTERN_COLOR_MASK) {
-          stringstream ss;
-          ss << y << " " << x << " " << int(cell & LANTERN_COLOR_MASK);
-          ret.push_back(ss.str());
-        } else if (cell == SLASH_MIRROR) {
-          stringstream ss;
-          ss << y << " " << x << " /";
-          ret.push_back(ss.str());
-        } else if (cell == BACKSLASH_MIRROR) {
-          stringstream ss;
-          ss << y << " " << x << " \\";
-          ret.push_back(ss.str());
-        } else if (cell == OBSTACLE) {
-          if (!initial_board_.IsObstacle(x, y)) {
-            stringstream ss;
-            ss << y << " " << x << " X";
-            ret.push_back(ss.str());
-          }
-        }
-      }
-    }
-    return ret;
+    return result_;
   }
 
  private:
@@ -716,9 +691,37 @@ class CrystalLighting {
         }
       }
     }
-    return Optimizer(timer, board, cost_lantern, cost_mirror, cost_obstacle,
-                     max_mirrors, max_obstacles)
-        .Optimize();
+    const OptimizerResult& result =
+        Optimizer(timer, board, cost_lantern, cost_mirror, cost_obstacle,
+                  max_mirrors, max_obstacles)
+            .Optimize();
+
+    vector<string> ret;
+    for (int y = 0; y < board.h; ++y) {
+      for (int x = 0; x < board.w; ++x) {
+        uint8_t cell = result.cells[x + y * board.w];
+        if (cell & LANTERN_COLOR_MASK) {
+          stringstream ss;
+          ss << y << " " << x << " " << int(cell & LANTERN_COLOR_MASK);
+          ret.push_back(ss.str());
+        } else if (cell == SLASH_MIRROR) {
+          stringstream ss;
+          ss << y << " " << x << " /";
+          ret.push_back(ss.str());
+        } else if (cell == BACKSLASH_MIRROR) {
+          stringstream ss;
+          ss << y << " " << x << " \\";
+          ret.push_back(ss.str());
+        } else if (cell == OBSTACLE) {
+          if (!board.IsObstacle(x, y)) {
+            stringstream ss;
+            ss << y << " " << x << " X";
+            ret.push_back(ss.str());
+          }
+        }
+      }
+    }
+    return ret;
   }
 };
 
