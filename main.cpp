@@ -65,6 +65,7 @@ struct Board {
   int obstacles;
   int mirrors;
   int lanterns;
+  int good_lays;
   int wrong_lays;
   int invalid_lays;
   int lit_crystals;
@@ -185,7 +186,9 @@ struct Board {
         --crystals_nbit_off[__builtin_popcount(prev_lit_color ^ crystal_color)];
         ++crystals_nbit_off[__builtin_popcount(lit_color ^ crystal_color)];
 
-        if (!(lantern_color & crystal_color)) {
+        if (lantern_color & crystal_color) {
+          ++good_lays;
+        } else {
           ++wrong_lays;
         }
 
@@ -233,7 +236,9 @@ struct Board {
         --crystals_nbit_off[__builtin_popcount(prev_lit_color ^ crystal_color)];
         ++crystals_nbit_off[__builtin_popcount(lit_color ^ crystal_color)];
 
-        if (!(lantern_color & crystal_color)) {
+        if (lantern_color & crystal_color) {
+          --good_lays;
+        } else {
           --wrong_lays;
         }
 
@@ -333,6 +338,7 @@ struct Board {
                                   const Board& initial_board) const {
     vector<vector<uint8_t>> local_lit_colors(w, vector<uint8_t>(h, 0));
     int local_invalid_lays = 0;
+    int local_good_lays = 0;
     int local_wrong_lays = 0;
     auto update_lay = [&](int x, int y, int dir, uint8_t color) {
       while (true) {
@@ -351,7 +357,9 @@ struct Board {
           dir = MIRROR_B_TO[dir];
         } else if (IsCrystal(x, y)) {
           local_lit_colors[x][y] |= color;
-          if (!(color & GetCrystalColor(x, y))) {
+          if (color & GetCrystalColor(x, y)) {
+            ++local_good_lays;
+          } else {
             ++local_wrong_lays;
           }
           return;
@@ -434,6 +442,12 @@ struct Board {
       assert(crystals_nbit_off[i] == local_crystals_nbit_off[i]);
     }
 
+    if (good_lays != local_good_lays) {
+      cerr << message << endl;
+      cerr << good_lays << " != " << local_good_lays << endl;
+    }
+    assert(good_lays == local_good_lays);
+
     if (wrong_lays != local_wrong_lays) {
       cerr << message << endl;
       cerr << wrong_lays << " != " << local_wrong_lays << endl;
@@ -497,9 +511,9 @@ class Solver {
              -0.1 * board_.mirrors * cost_mirror_ +
              -0.1 * board_.crystals_nbit_off[1] +
              -0.3 * board_.crystals_nbit_off[2] +
-             -0.6 * board_.crystals_nbit_off[3] + -0.1 * board_.wrong_lays +
-             -2.0 * board_.invalid_lays + -10.0 * exceeded_mirrors +
-             -10.0 * exceeded_obstacles);
+             -0.6 * board_.crystals_nbit_off[3] + +0.08 * board_.good_lays +
+             -0.1 * board_.wrong_lays + -2.0 * board_.invalid_lays +
+             -10.0 * exceeded_mirrors + -10.0 * exceeded_obstacles);
   }
 
   inline double GetTemperature() const {
