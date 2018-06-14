@@ -530,7 +530,7 @@ class Optimizer {
     vector<pair<int, int>> available_positions;
     for (int y = 0; y < board_height_; ++y) {
       for (int x = 0; x < board_width_; ++x) {
-        if (board_.IsEmpty(x, y)) {
+        if (initial_board_.IsEmpty(x, y)) {
           available_positions.emplace_back(make_pair(x, y));
         }
       }
