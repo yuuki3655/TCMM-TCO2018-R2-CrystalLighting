@@ -577,7 +577,7 @@ class Optimizer {
             !board_.HasLay(x, y) ||
             (board_.mirrors >= max_mirrors_ &&
              board_.obstacles >= max_obstacles_) ||
-            uniform_real_distribution<double>(0, 1.0)(gen) < 0.8;
+            uniform_real_distribution<double>(0, 1.0)(gen) < 0.0001;
         if (create_lantern) {
           int prev_good_lays = board_.good_lays;
           int prev_wrong_lays = board_.wrong_lays;
@@ -589,12 +589,13 @@ class Optimizer {
             board_.RemoveLantern(x, y, color);
           }
         } else {
-          assert(max_mirrors_ || max_obstacles_);
+          assert(board_.obstacles < max_obstacles_ ||
+                 board_.mirrors < max_mirrors_);
           uint8_t item_type = uniform_int_distribution<int>(1, 3)(gen) << 6;
-          if (max_obstacles_ == 0) {
+          if (board_.obstacles >= max_obstacles_) {
             item_type = uniform_int_distribution<int>(1, 2)(gen) << 6;
           }
-          if (max_mirrors_ == 0) {
+          if (board_.mirrors >= max_mirrors_) {
             item_type = OBSTACLE;
           }
           if (item_type == OBSTACLE) {
