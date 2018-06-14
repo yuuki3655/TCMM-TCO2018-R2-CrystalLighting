@@ -40,10 +40,14 @@ constexpr int MIRROR_B_TO[] = {3, 2, 1, 0};
 // http://community.topcoder.com/longcontest/?module=ViewProblemSolution&pm=14907&rd=17153&cr=20315020&subnum=17
 class Timer {
  public:
+  Timer(double time_limit_seconds) : time_limit_seconds_(time_limit_seconds) {}
   inline void Start() { start_seconds_ = GetSeconds(); }
 
   inline double GetNormalizedTime() const {
-    return min((GetSeconds() - start_seconds_) / TIME_LIMIT_SECONDS, 0.9999);
+    return min((GetSeconds() - start_seconds_) / time_limit_seconds_, 1.0);
+  }
+  inline bool IsTimeout() const {
+    return GetSeconds() - start_seconds_ >= time_limit_seconds_;
   }
 
  private:
@@ -55,7 +59,7 @@ class Timer {
   inline double GetSeconds() const { return GetTSC() / 2.79e9; }
 
   double start_seconds_;
-  static constexpr double TIME_LIMIT_SECONDS = 10;
+  const double time_limit_seconds_;
 };
 
 struct Board {
@@ -518,7 +522,7 @@ class Optimizer {
   }
 
   inline double GetTemperature() const {
-    return 1.0 - timer_->GetNormalizedTime();
+    return max(1.0 - timer_->GetNormalizedTime(), 0.0001);
   }
 
   void SimulatedAnnealing() {
@@ -551,7 +555,7 @@ class Optimizer {
       }
       return false;
     };
-    while (timer_->GetNormalizedTime() < 0.95) {
+    while (!timer_->IsTimeout()) {
 #ifdef LOCAL_DEBUG_MODE
       static double next_report_time = 0;
       if (next_report_time < timer_->GetNormalizedTime()) {
@@ -692,7 +696,7 @@ class CrystalLighting {
   vector<string> placeItems(vector<string> target_board, int cost_lantern,
                             int cost_mirror, int cost_obstacle, int max_mirrors,
                             int max_obstacles) {
-    Timer timer;
+    Timer timer(/*time_limit_seconds=*/9.8);
     timer.Start();
     Board board = {};
     board.w = target_board[0].size();
