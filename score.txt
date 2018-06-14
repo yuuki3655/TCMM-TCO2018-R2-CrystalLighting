@@ -1,5 +1,5 @@
-win = 374
-lose = 401
-tie = 25
-prev_total = 7498416.0
-curr_total = 7399407.0
+win = 370
+lose = 403
+tie = 27
+prev_total = 7399407.0
+curr_total = 7417626.0
