@@ -463,15 +463,16 @@ struct Board {
 #endif
 };
 
-struct Answer {
+struct OptimizerResult {
   int score;
   vector<uint8_t> cells;
 };
 
-class Solver {
+class Optimizer {
  public:
-  Solver(const Timer& timer, const Board& initial_board, int cost_lantern,
-         int cost_mirror, int cost_obstacle, int max_mirrors, int max_obstacles)
+  Optimizer(const Timer& timer, const Board& initial_board, int cost_lantern,
+            int cost_mirror, int cost_obstacle, int max_mirrors,
+            int max_obstacles)
       : timer_(&timer),
         board_width_(initial_board.w),
         board_height_(initial_board.h),
@@ -483,11 +484,11 @@ class Solver {
         max_obstacles_(max_obstacles),
         board_(initial_board) {}
 
-  inline void MaybeUpdateBestAnswer() {
+  inline void MaybeUpdateResult() {
     int score = GetScore();
-    if (score > best_answer_.score) {
-      best_answer_.score = score;
-      best_answer_.cells = board_.cells;
+    if (score > result_.score) {
+      result_.score = score;
+      result_.cells = board_.cells;
     }
   }
 
@@ -540,7 +541,7 @@ class Solver {
 #ifdef ENABLE_INTERNAL_STATE_CHECK
       board_.CheckInternalStateForDebug("accept lambda", initial_board_);
 #endif
-      MaybeUpdateBestAnswer();
+      MaybeUpdateResult();
       double new_energy = GetEnergy();
       if (new_energy <= energy ||
           rand_prob(gen) < exp(-(new_energy - energy) / GetTemperature())) {
@@ -559,8 +560,8 @@ class Solver {
              << ", obstacles: " << board_.obstacles << "/" << max_obstacles_
              << ", mirrors: " << board_.mirrors << "/" << max_mirrors_
              << ", energy: " << energy << ", best_energy: " << best_energy
-             << ", score: " << GetScore()
-             << ", best_score: " << best_answer_.score << endl;
+             << ", score: " << GetScore() << ", best_score: " << result_.score
+             << endl;
         next_report_time += 0.1;
       }
 #endif
@@ -632,7 +633,7 @@ class Solver {
     }
   }
 
-  vector<string> Solve() {
+  vector<string> Optimize() {
 #ifdef ENABLE_INTERNAL_STATE_CHECK
     board_.CheckInternalStateForDebug("initial board state", initial_board_);
 #endif
@@ -640,13 +641,13 @@ class Solver {
     SimulatedAnnealing();
 
 #ifdef LOCAL_DEBUG_MODE
-    cerr << "Final score = " << best_answer_.score << endl;
+    cerr << "Final score = " << result_.score << endl;
 #endif
 
     vector<string> ret;
     for (int y = 0; y < board_height_; ++y) {
       for (int x = 0; x < board_width_; ++x) {
-        uint8_t cell = best_answer_.cells[x + y * board_width_];
+        uint8_t cell = result_.cells[x + y * board_width_];
         if (cell & LANTERN_COLOR_MASK) {
           stringstream ss;
           ss << y << " " << x << " " << int(cell & LANTERN_COLOR_MASK);
@@ -683,7 +684,7 @@ class Solver {
   const int max_obstacles_;
 
   Board board_;
-  Answer best_answer_ = {};
+  OptimizerResult result_ = {};
 };
 
 class CrystalLighting {
@@ -711,9 +712,9 @@ class CrystalLighting {
         }
       }
     }
-    return Solver(timer, board, cost_lantern, cost_mirror, cost_obstacle,
-                  max_mirrors, max_obstacles)
-        .Solve();
+    return Optimizer(timer, board, cost_lantern, cost_mirror, cost_obstacle,
+                     max_mirrors, max_obstacles)
+        .Optimize();
   }
 };
 
