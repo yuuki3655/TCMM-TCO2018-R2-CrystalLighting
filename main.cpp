@@ -516,13 +516,13 @@ class Optimizer {
              -0.1 * board_.mirrors * cost_mirror_ +
              -0.1 * board_.crystals_nbit_off[1] +
              -0.3 * board_.crystals_nbit_off[2] +
-             -0.6 * board_.crystals_nbit_off[3] + 0.01 * board_.good_lays +
-             -0.01 * board_.wrong_lays + -2.0 * board_.invalid_lays +
+             -0.6 * board_.crystals_nbit_off[3] + +0.08 * board_.good_lays +
+             -0.1 * board_.wrong_lays + -2.0 * board_.invalid_lays +
              -10.0 * exceeded_mirrors + -10.0 * exceeded_obstacles);
   }
 
   inline double GetTemperature() const {
-    return max(1.0 - timer_->GetNormalizedTime(), 1e-8);
+    return max(1.0 - timer_->GetNormalizedTime(), 0.0001);
   }
 
   void SimulatedAnnealing() {
@@ -575,9 +575,8 @@ class Optimizer {
       if (board_.IsEmpty(x, y)) {
         bool create_lantern =
             !board_.HasLay(x, y) ||
-            (board_.mirrors >= max_mirrors_ &&
-             board_.obstacles >= max_obstacles_) ||
-            uniform_real_distribution<double>(0, 1.0)(gen) < 0.0001;
+            (max_mirrors_ == 0 && max_obstacles_ == 0) ||
+            uniform_real_distribution<double>(0, 1.0)(gen) < 0.001;
         if (create_lantern) {
           int prev_good_lays = board_.good_lays;
           int prev_wrong_lays = board_.wrong_lays;
@@ -589,24 +588,27 @@ class Optimizer {
             board_.RemoveLantern(x, y, color);
           }
         } else {
-          assert(board_.obstacles < max_obstacles_ ||
-                 board_.mirrors < max_mirrors_);
+          assert(max_mirrors_ || max_obstacles_);
           uint8_t item_type = uniform_int_distribution<int>(1, 3)(gen) << 6;
-          if (board_.obstacles >= max_obstacles_) {
+          if (max_obstacles_ == 0) {
             item_type = uniform_int_distribution<int>(1, 2)(gen) << 6;
           }
-          if (board_.mirrors >= max_mirrors_) {
+          if (max_mirrors_ == 0) {
             item_type = OBSTACLE;
           }
           if (item_type == OBSTACLE) {
-            board_.PutObstacle(x, y);
-            if (!accept()) {
-              board_.RemoveObstacle(x, y);
+            if (board_.obstacles < max_obstacles_) {
+              board_.PutObstacle(x, y);
+              if (!accept()) {
+                board_.RemoveObstacle(x, y);
+              }
             }
           } else {
-            board_.PutMirror(x, y, item_type);
-            if (!accept()) {
-              board_.RemoveMirror(x, y, item_type);
+            if (board_.mirrors < max_mirrors_) {
+              board_.PutMirror(x, y, item_type);
+              if (!accept()) {
+                board_.RemoveMirror(x, y, item_type);
+              }
             }
           }
         }
