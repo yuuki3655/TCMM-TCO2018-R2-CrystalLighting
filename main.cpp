@@ -574,9 +574,13 @@ class Solver {
             (max_mirrors_ == 0 && max_obstacles_ == 0) ||
             uniform_real_distribution<double>(0, 1.0)(gen) < 0.001;
         if (create_lantern) {
+          int prev_good_lays = board_.good_lays;
+          int prev_wrong_lays = board_.wrong_lays;
           uint8_t color = 1 << uniform_int_distribution<int>(0, 2)(gen);
           board_.PutLantern(x, y, color);
-          if (!accept()) {
+          if ((prev_good_lays >= board_.good_lays &&
+               prev_wrong_lays <= board_.wrong_lays) ||
+              !accept()) {
             board_.RemoveLantern(x, y, color);
           }
         } else {
